@@ -1,0 +1,95 @@
+/* Design tokens, light and dark. The theme
+   follows nativeTheme (明亮 / 黑暗 / 系统 in settings) via prefers-color-scheme. */
+:root {
+  color-scheme: light;
+  --bg-main: rgb(255 255 255);
+  --bg-top: rgb(255 255 255);
+  --bg-bottom: rgb(242 241 240);
+  --scrim: rgba(17 17 17 / 0.45);
+
+  --text-1: rgba(17 17 17 / 1);
+  --text-2: rgba(17 17 17 / 0.75);
+  --text-3: rgba(17 17 17 / 0.55);
+  --text-4: rgba(17 17 17 / 0.35);
+  --text-pivot: rgba(242 241 240 / 1);
+
+  --fill-action: rgba(119 119 119 / 0.1);
+  --fill-action-hover: rgba(119 119 119 / 0.2);
+  --fill-action-click: rgba(119 119 119 / 0.3);
+  --fill-none-hover: rgba(119 119 119 / 0.07);
+  --fill-none-selected: rgba(119 119 119 / 0.15);
+  --fill-thin: rgba(119 119 119 / 0.05);
+  --fill-tough: rgba(119 119 119 / 0.1);
+
+  --border-thick: rgba(119 119 119 / 0.15);
+  --border-thick-hover: rgba(119 119 119 / 0.3);
+  --border-focus: rgba(119 119 119 / 0.4);
+  --border-strong: rgba(17 17 17 / 1);
+  --border-thin: rgba(119 119 119 / 0.07);
+
+  --primary: rgb(29 26 26);
+  --primary-hover: rgb(60 59 59);
+  --accent: rgb(31 93 242);
+  --accent-hover: rgb(52 107 255);
+  --accent-1: rgba(52 107 255 / 0.1);
+  --accent-2: rgba(52 107 255 / 0.3);
+  --accent-3: rgba(52 107 255 / 0.5);
+  --success: rgb(0 135 112);
+  --success-1: rgba(0 163 124 / 0.1);
+  --success-3: rgba(0 163 124 / 0.5);
+  --error: rgb(236 15 56);
+  --error-hover: rgb(255 37 67);
+  --error-1: rgba(255 37 67 / 0.1);
+
+  --shadow-pop: 0 4px 6px -2px rgba(17 17 17 / 0.03), 0 12px 16px -4px rgba(17 17 17 / 0.1),
+    0 0 1px 0 rgba(17 17 17 / 0.25);
+  --font-sans: Arial, 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  --font-prompt: Prompt, 'Microsoft YaHei', var(--font-sans);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-main: rgb(36 33 33);
+    --bg-top: rgb(60 59 59);
+    --bg-bottom: rgb(17 17 17);
+
+    --text-1: rgba(242 241 240 / 1);
+    --text-2: rgba(242 241 240 / 0.75);
+    --text-3: rgba(242 241 240 / 0.55);
+    --text-4: rgba(242 241 240 / 0.35);
+    --text-pivot: rgba(17 17 17 / 1);
+
+    --fill-action: rgba(119 119 119 / 0.4);
+    --fill-action-hover: rgba(119 119 119 / 0.5);
+    --fill-action-click: rgba(119 119 119 / 0.3);
+    --fill-none-hover: rgba(119 119 119 / 0.3);
+    --fill-none-selected: rgba(119 119 119 / 0.2);
+    --fill-thin: rgba(119 119 119 / 0.15);
+    --fill-tough: rgba(119 119 119 / 0.2);
+
+    --border-thick: rgba(242 241 240 / 0.1);
+    --border-thick-hover: rgba(242 241 240 / 0.2);
+    --border-focus: rgba(242 241 240 / 0.3);
+    --border-strong: rgba(242 241 240 / 1);
+    --border-thin: rgba(119 119 119 / 0.15);
+
+    --primary: rgb(242 241 240);
+    --primary-hover: rgb(227 226 226);
+    --accent: rgb(79 123 255);
+    --accent-hover: rgb(101 138 255);
+    --accent-1: rgba(52 107 255 / 0.2);
+    --accent-2: rgba(52 107 255 / 0.4);
+    --accent-3: rgba(52 107 255 / 0.6);
+    --success: rgb(0 149 124);
+    --success-1: rgba(0 163 124 / 0.2);
+    --success-3: rgba(0 163 124 / 0.6);
+    --error: rgb(255 82 92);
+    --error-hover: rgb(255 112 115);
+    --error-1: rgba(255 37 67 / 0.2);
+
+    --shadow-pop: 0 4px 6px -2px rgba(0 0 0 / 0.2), 0 12px 16px -4px rgba(0 0 0 / 0.35),
+      0 0 1px 0 rgba(242 241 240 / 0.55);
+  }
+}

@@ -1,0 +1,407 @@
+/* Answer card: 744 wide, 400–700 tall. */
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--text-1);
+}
+
+.page {
+  height: 100%;
+  padding: 24px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 744px;
+  max-width: 100%;
+  min-height: min(400px, calc(100vh - 32px));
+  max-height: min(700px, calc(100vh - 32px));
+  padding: 16px;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--border-thick);
+  background: var(--bg-bottom);
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+}
+.card.shown {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- header ---------- */
+.card-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  flex-shrink: 0;
+}
+.card-logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-prompt);
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 20px;
+  letter-spacing: -0.01em;
+  user-select: none;
+}
+.card-logo svg {
+  fill: var(--text-1);
+}
+.close-btn {
+  position: absolute;
+  right: 0;
+  top: -2px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 5px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.close-btn:hover {
+  background: var(--fill-action);
+}
+
+/* ---------- scrolling body ---------- */
+.card-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden auto;
+  margin-right: -16px;
+  padding-right: 16px;
+}
+.card-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.card-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+.card-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border-thick);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.card-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-thick-hover);
+}
+
+/* ---------- the question ---------- */
+.prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 0 12px 0 16px;
+}
+.prompt-box {
+  position: relative;
+  width: 100%;
+  max-height: 44px;
+  overflow: hidden;
+  transition: max-height 0.3s ease-in-out;
+}
+.prompt-box.open {
+  max-height: none;
+  overflow: visible;
+}
+.prompt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.prompt-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.prompt-icon svg,
+.copy-btn svg,
+.close-btn svg,
+.answer-title svg {
+  fill: currentColor;
+}
+.prompt-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.prompt-text.selected {
+  color: var(--text-3);
+}
+.quote-bar {
+  position: relative;
+  width: 13px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+.quote-bar::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  bottom: 5px;
+  width: 1px;
+  border-radius: 999px;
+  background: var(--fill-action-click);
+}
+.copy-spacer {
+  width: 26px;
+  flex-shrink: 0;
+}
+.more {
+  position: absolute;
+  right: 22px;
+  bottom: 3px;
+  padding: 0 4px;
+  border: 0;
+  background: var(--bg-bottom);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 14px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.more::before {
+  content: '';
+  position: absolute;
+  right: 100%;
+  top: 0;
+  width: 50px;
+  height: 16px;
+  background: linear-gradient(to right, transparent, var(--bg-bottom));
+  pointer-events: none;
+}
+.less {
+  margin-left: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 14px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.copy-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition:
+    opacity 0.2s ease,
+    background-color 0.15s;
+}
+.copy-btn:hover {
+  background: var(--fill-action);
+}
+.copy-btn.copied {
+  color: var(--success);
+  background: var(--fill-none-selected);
+}
+
+/* ---------- the answer ---------- */
+.answer {
+  flex-grow: 1;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-thin);
+  border-radius: 12px;
+  background: var(--bg-main);
+}
+.answer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 51px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border-thin);
+}
+.answer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.answer-copy {
+  opacity: 0;
+}
+.answer-head:hover .answer-copy,
+.answer-copy.copied,
+.answer-copy:focus-visible {
+  opacity: 1;
+}
+.answer-body {
+  padding: 12px 16px;
+  font-size: 17px;
+  line-height: 28px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* ---------- markdown ---------- */
+.markdown > * + * {
+  margin-top: 16px;
+}
+.markdown h1 {
+  font-size: 30px;
+  line-height: 34px;
+  font-weight: 700;
+}
+.markdown h2 {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 700;
+}
+.markdown h3 {
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 700;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4em;
+}
+.markdown li + li {
+  margin-top: 4px;
+}
+.markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--fill-action);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.88em;
+}
+.markdown pre {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--fill-thin);
+  border: 1px solid var(--border-thin);
+  overflow-x: auto;
+  font-size: 14px;
+  line-height: 22px;
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--fill-action-click);
+  color: var(--text-2);
+}
+.markdown table {
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 22px;
+}
+.markdown th,
+.markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--border-thick);
+  text-align: left;
+}
+.markdown th {
+  background: var(--fill-thin);
+  font-weight: 600;
+}
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border-thick);
+}
+.markdown strong {
+  font-weight: 700;
+}
+.markdown u {
+  text-decoration-color: var(--text-4);
+}
+
+/* ---------- tooltips ---------- */
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(29 26 26);
+  color: rgb(242 241 240);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  pointer-events: none;
+  animation: tip-in 0.12s 0.35s both;
+}
+.close-btn[data-key]:hover::after {
+  content: attr(data-tip) '  ' attr(data-key);
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.copy-btn {
+  position: relative;
+}
+@keyframes tip-in {
+  from {
+    opacity: 0;
+  }
+}

@@ -1,0 +1,36 @@
+appId: local.xenho.reatypeless
+productName: Saydra
+# uiohook-napi and get-windows ship N-API prebuilds; rebuilding needs Visual Studio for nothing
+npmRebuild: false
+directories:
+  output: output/installer
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources/tray.png
+    to: tray.png
+  # UI Automation + speaker mute helper, run by Windows PowerShell
+  - from: src/main/helpers/win-helper.ps1
+    to: win-helper.ps1
+  # Local SenseVoice model: only the two files the recognizer loads
+  - from: data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09
+    to: models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09
+    filter:
+      - model.int8.onnx
+      - tokens.txt
+asarUnpack:
+  - node_modules/uiohook-napi/**
+  - node_modules/get-windows/**
+  # native addon + onnxruntime DLLs must be real files on disk
+  - node_modules/sherpa-onnx-node/**
+  - node_modules/sherpa-onnx-win-x64/**
+win:
+  target: nsis
+  icon: resources/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Saydra

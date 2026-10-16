@@ -1,0 +1,47 @@
+{
+  "name": "rea-typeless",
+  "productName": "Saydra",
+  "version": "0.2.3",
+  "description": "Saydra: hold-to-talk voice dictation for Windows, powered by your own model API key",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:pipeline": "node --use-env-proxy --no-warnings --import tsx scripts/test-pipeline.ts",
+    "eval:refine": "node --use-env-proxy --no-warnings --import tsx scripts/eval-refine.ts",
+    "bench:refine": "node --use-env-proxy --no-warnings --import tsx scripts/bench-refine.ts",
+    "test:hotkey": "tsx scripts/test-hotkey.ts",
+    "test:hallucination": "tsx scripts/test-hallucination.ts",
+    "test:asr": "tsx scripts/test-asr.ts",
+    "bench:asr": "node --use-env-proxy --no-warnings --import tsx scripts/bench-asr.ts",
+    "dist": "electron-vite build && electron-builder --win --config electron-builder.yml",
+    "test:db": "node --no-warnings --import tsx scripts/test-db.ts",
+    "test:ask": "tsx scripts/test-ask.ts",
+    "test:learn": "tsx scripts/test-learn.ts",
+    "test:paste": "tsx scripts/test-paste.ts",
+    "test:case": "tsx scripts/test-case.ts"
+  },
+  "dependencies": {
+    "electron-store": "^12.0.0",
+    "get-windows": "^9.3.0",
+    "koffi": "^3.3.3",
+    "preact": "^11.0.1",
+    "sherpa-onnx-node": "^1.13.8",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@fontsource/prompt": "^5.3.0",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.5",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "ffmpeg-static": "^5.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.7"
+  }
+}
