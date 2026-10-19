@@ -89,9 +89,9 @@ export type UpdateState =
   | { kind: 'idle' }
   | { kind: 'checking' }
   | { kind: 'latest' }
-  | { kind: 'available'; version: string }
-  | { kind: 'downloading'; version: string; percent: number }
-  | { kind: 'ready'; version: string }
+  | { kind: 'available'; version: string; notes: string[] }
+  | { kind: 'downloading'; version: string; notes: string[]; percent: number }
+  | { kind: 'ready'; version: string; notes: string[] }
   | { kind: 'error'; message: string }
 
 export const HUB = {

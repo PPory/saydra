@@ -317,6 +317,16 @@ function AboutPage({ update }: { update: UpdateState }) {
       <h2 class="set-title">关于</h2>
       <Section icon="info" title="Saydra">
         <UpdateRow version={info?.version ?? ''} update={update} />
+        {'notes' in update && update.notes.length > 0 && (
+          <div class="update-notes">
+            <span class="update-notes-title">{update.version} 更新了这些</span>
+            <ul>
+              {update.notes.map((n) => (
+                <li>{n}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <Row
           title="怎么用"
           description="在任何输入框里按住快捷键说话，松开后整理好的文字自动出现在光标处；轻按一下进入免提，再按一下结束，Esc 取消。"

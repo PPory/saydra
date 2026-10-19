@@ -113,6 +113,23 @@ button {
   background: var(--fill-none-selected);
   color: var(--text-1);
 }
+.update-notes {
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--fill-none-hover);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-2);
+}
+.update-notes-title {
+  font-weight: 500;
+  color: var(--text-1);
+}
+.update-notes ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
 .nav-dot {
   width: 7px;
   height: 7px;

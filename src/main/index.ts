@@ -874,6 +874,8 @@ function onBarAction(action: BarActionName): void {
       return void clipboard.writeText(missedText)
     case 'install-update':
       return installUpdate()
+    case 'show-update':
+      return openHub('about')
     case 'open-permissions':
       return openHub(setupProblem() ? 'welcome' : 'permissions')
   }
@@ -1114,7 +1116,10 @@ function onUpdateState(s: UpdateState): void {
     id: 'update',
     title: `Saydra ${s.version} 已准备好`,
     description: '重启一下就能用上新版本，设置和历史都会保留。',
-    actions: [{ label: '重启更新', action: 'install-update', primary: true }]
+    actions: [
+      { label: '更新了什么', action: 'show-update' },
+      { label: '重启更新', action: 'install-update', primary: true }
+    ]
   })
   if (UPDATE_SHOTS) void shootUpdate(UPDATE_SHOTS)
 }

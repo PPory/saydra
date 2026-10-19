@@ -3,7 +3,13 @@
 // is only ad-hoc signed, which the updater can't swap in, so there it links to the release.
 import { app } from 'electron'
 import electronUpdater from 'electron-updater'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { readFile, rm, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import type { UpdateState } from '../shared/hub'
+import { releaseNoteLines } from './release-notes'
 
 const { autoUpdater } = electronUpdater
 
@@ -36,21 +42,32 @@ export function startUpdater(opts: {
   if (!app.isPackaged && !testUrl) return
   started = true
   onChange = opts.onChange
-  if (testUrl) autoUpdater.setFeedURL({ provider: 'generic', url: testUrl })
+  if (testUrl) {
+    // Own download cache: a test build must never become the cached "current" installer
+    // that the real app diffs its next update against.
+    const config = join(app.getPath('userData'), 'app-update.yml')
+    writeFileSync(config, `provider: generic\nurl: ${testUrl}\nupdaterCacheDirName: saydra-updatetest-updater\n`)
+    autoUpdater.updateConfigPath = config
+    autoUpdater.setFeedURL({ provider: 'generic', url: testUrl })
+  }
+  const ready = canInstall ? dropStaleBlockmap(testUrl ? 'saydra-updatetest-updater' : cacheDirName()) : Promise.resolve()
   autoUpdater.autoDownload = canInstall
   // A test run must never install its build over the real one.
   autoUpdater.autoInstallOnAppQuit = canInstall && !testUrl
   autoUpdater.logger = null
 
-  autoUpdater.on('update-available', (info) =>
-    set(canInstall ? { kind: 'downloading', version: info.version, percent: 0 } : { kind: 'available', version: info.version })
-  )
+  autoUpdater.on('update-available', (info) => {
+    const notes = releaseNoteLines(info.releaseNotes)
+    set(canInstall ? { kind: 'downloading', version: info.version, notes, percent: 0 } : { kind: 'available', version: info.version, notes })
+  })
   autoUpdater.on('update-not-available', () => set({ kind: 'latest' }))
   autoUpdater.on('download-progress', (p) => {
     const percent = Math.floor(p.percent)
     if (state.kind === 'downloading' && percent !== state.percent) set({ ...state, percent })
   })
-  autoUpdater.on('update-downloaded', (info) => set({ kind: 'ready', version: info.version }))
+  autoUpdater.on('update-downloaded', (info) =>
+    set({ kind: 'ready', version: info.version, notes: releaseNoteLines(info.releaseNotes) })
+  )
   autoUpdater.on('error', (err) => {
     opts.log(`${state.kind}: ${String(err?.message ?? err).split('\n')[0].slice(0, 300)}`)
     set({ kind: 'error', message: errorMessage(err, state.kind === 'downloading') })
@@ -59,9 +76,35 @@ export function startUpdater(opts: {
     retryTimer = setTimeout(scheduled, RETRY_AFTER_ERROR_MS)
   })
 
-  const scheduled = () => opts.enabled() && void checkForUpdates()
+  const scheduled = () => opts.enabled() && void ready.then(checkForUpdates)
   setTimeout(scheduled, FIRST_CHECK_MS)
   setInterval(scheduled, CHECK_EVERY_MS)
+}
+
+// The differential download rebuilds the new installer from the cached installer.exe,
+// trusting the cached current.blockmap to describe it. Installing a version by hand
+// replaces installer.exe but leaves the old blockmap, and then every update fails its
+// checksum and falls back to the full ~270MB. Sizes differing means they don't belong
+// together: drop the blockmap and the updater fetches the right one from the release.
+async function dropStaleBlockmap(dirName: string | null): Promise<void> {
+  if (!dirName) return
+  const dir = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), dirName)
+  try {
+    const map = JSON.parse(gunzipSync(await readFile(join(dir, 'current.blockmap'))).toString())
+    const mapped = (map.files[0].sizes as number[]).reduce((a, b) => a + b, 0)
+    if (mapped !== (await stat(join(dir, 'installer.exe'))).size) await rm(join(dir, 'current.blockmap'))
+  } catch {
+    // nothing cached yet, or nothing to compare with
+  }
+}
+
+// The cache folder name electron-builder wrote into app-update.yml.
+function cacheDirName(): string | null {
+  try {
+    return /^updaterCacheDirName:\s*(\S+)/m.exec(readFileSync(join(process.resourcesPath, 'app-update.yml'), 'utf8'))?.[1] ?? null
+  } catch {
+    return null
+  }
 }
 
 // Only a failed connection is a network problem; a 404 or a release without

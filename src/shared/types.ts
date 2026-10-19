@@ -43,6 +43,7 @@ export type BarActionName =
   | 'copy-last' // 复制最后的转录: the paste went nowhere, copy it on request
   | 'open-permissions' // macOS: a permission the shortcuts need is missing
   | 'install-update' // a downloaded update: restart into it
+  | 'show-update' // what the downloaded update changes, on the hub's 关于 page
   | 'dismiss'
 
 export interface AlertAction {
