@@ -72,7 +72,7 @@ function Row({ item, onChanged }: { item: HistoryItem; onChanged: () => void }) 
           <span class="history-meta">
             {item.mode === 'translate' && <em class="tag tag-translate">翻译</em>}
             {item.mode === 'ask' && <em class="tag tag-ask">问任何问题</em>}
-            {item.appName?.replace(/\.exe$/i, '')}
+            {item.appName?.replace(/\.(exe|app)$/i, '')}
           </span>
         )}
       </div>

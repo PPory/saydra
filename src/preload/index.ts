@@ -24,6 +24,8 @@ import {
   type HomeStats,
   type HubChange,
   type HubRoute,
+  type MacPermission,
+  type MacPermissions,
   type ShortcutTarget
 } from '../shared/hub'
 
@@ -78,14 +80,18 @@ const api = {
   historyAnswer: (id: string): Promise<void> => ipcRenderer.invoke(HUB.historyAnswer, id),
   dictList: (query: string, source: DictSource | null): Promise<DictWord[]> =>
     ipcRenderer.invoke(HUB.dictList, query, source),
-  dictAdd: (term: string): Promise<Result> => ipcRenderer.invoke(HUB.dictAdd, term),
-  dictUpdate: (id: number, term: string): Promise<Result> => ipcRenderer.invoke(HUB.dictUpdate, id, term),
+  dictAdd: (term: string, heardAs: string[]): Promise<Result> => ipcRenderer.invoke(HUB.dictAdd, term, heardAs),
+  dictUpdate: (id: number, term: string, heardAs: string[]): Promise<Result> =>
+    ipcRenderer.invoke(HUB.dictUpdate, id, term, heardAs),
   dictDelete: (ids: number[]): Promise<number> => ipcRenderer.invoke(HUB.dictDelete, ids),
   dictImport: (): Promise<Result> => ipcRenderer.invoke(HUB.dictImport),
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(HUB.appInfo),
   openDataDir: (): Promise<void> => ipcRenderer.invoke(HUB.openDataDir),
   captureShortcut: (target: ShortcutTarget): Promise<CaptureResult> => ipcRenderer.invoke(HUB.captureShortcut, target),
-  cancelCapture: (): Promise<void> => ipcRenderer.invoke(HUB.cancelCapture)
+  cancelCapture: (): Promise<void> => ipcRenderer.invoke(HUB.cancelCapture),
+  permissions: (): Promise<MacPermissions | null> => ipcRenderer.invoke(HUB.permissions),
+  grantPermission: (kind: MacPermission): Promise<void> => ipcRenderer.invoke(HUB.grantPermission, kind),
+  relaunch: (): Promise<void> => ipcRenderer.invoke(HUB.relaunch)
 }
 
 export type ReaApi = typeof api

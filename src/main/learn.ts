@@ -152,6 +152,27 @@ export function findEdits(pasted: string, baselineRaw: string, currentRaw: strin
 }
 
 const MAX_TERM_CHARS = 30
+const MIN_FORM_CHARS = 2 // a one-character form (「的」→「地」) would rewrite everything
+
+// What recognition wrote where the user typed a dictionary word, as 常被识别成.
+// CJK edits are per character (「开花」→「开发」 diffs as 「花」→「发」), so the
+// word is widened back out: the term with the edit undone, found in the pasted text.
+export function heardForms(edits: Edit[], terms: string[]): Array<{ term: string; form: string }> {
+  const out: Array<{ term: string; form: string }> = []
+  for (const e of edits) {
+    for (const term of terms) {
+      if (!e.contextAfter.includes(term) || e.contextBefore.includes(term)) continue
+      for (let k = term.indexOf(e.added); k >= 0; k = term.indexOf(e.added, k + 1)) {
+        const form = term.slice(0, k) + e.removed + term.slice(k + e.added.length)
+        if (form.length < MIN_FORM_CHARS || onlyPunctuation(form) || form.toLowerCase() === term.toLowerCase()) continue
+        if (!e.contextBefore.includes(form)) continue
+        if (!out.some((o) => o.term === term && o.form === form)) out.push({ term, form })
+        break
+      }
+    }
+  }
+  return out
+}
 
 // Keep only words the user really typed in: present now, absent from what we
 // pasted, term-shaped, and not already in the dictionary.

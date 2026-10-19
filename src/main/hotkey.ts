@@ -23,7 +23,10 @@ type Phase = 'idle' | 'holding' | 'handsFree'
 const MODES: DictationMode[] = ['dictate', 'translate', 'ask']
 
 // Ctrl and Shift are harmless on their own; Alt and Win would open menus, so swallow those.
-const passesThrough = (vk: number) => vk === VK.LCtrl || vk === VK.RCtrl || vk === VK.LShift || vk === VK.RShift
+// macOS's fn opens no menu either; what 🌐 itself does (emoji picker, system dictation)
+// is turned off in System Settings instead, see the welcome guide.
+const passesThrough = (vk: number) =>
+  vk === VK.LCtrl || vk === VK.RCtrl || vk === VK.LShift || vk === VK.RShift || vk === VK.Fn
 
 // Gestures:
 //  - hold the shortcut to talk, release to stop

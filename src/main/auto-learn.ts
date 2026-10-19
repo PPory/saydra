@@ -2,12 +2,12 @@
 // later; if the user corrected how a word is written, add it to the dictionary
 // as 「自动添加」. Apps whose input boxes UI Automation cannot read (WeChat,
 // for one) are skipped silently.
-import { findEdits, groundTerms } from './learn'
+import { findEdits, groundTerms, heardForms } from './learn'
 import { chatWithFallback } from './llm'
 import { LEARN_PROMPT, learnUserMessage, parseLearnReply } from './prompts'
 import { refineTargets } from './providers'
 import { getDb } from './store'
-import { watchedInfo, watchFocus } from './win-helper'
+import { watchedInfo, watchFocus } from './platform/helper'
 
 const BASELINE_AFTER_MS = 150 // the box has taken the paste by now (pasteText already waited 300 ms)
 const CHECK_AFTER_MS = [8_000, 30_000]
@@ -23,7 +23,8 @@ interface Session {
 let session: Session | null = null
 type OnLearned = (words: string[]) => void
 
-// Corrections between two readings of the box -> new dictionary words.
+// Corrections between two readings of the box -> new dictionary words. What
+// each fix replaced is kept as the word's 常被识别成, so it is right next time.
 export async function learnFrom(pasted: string, baseline: string, current: string, seen = new Set<string>()): Promise<string[]> {
   const edits = findEdits(pasted, baseline, current).filter((e) => !seen.has(`${e.removed}→${e.added}`))
   if (!edits.length) return []
@@ -32,8 +33,13 @@ export async function learnFrom(pasted: string, baseline: string, current: strin
   if (!targets.length) return []
   const res = await chatWithFallback(targets, LEARN_PROMPT, learnUserMessage(edits), { wrapTag: '', maxTokens: 200, timeoutMs: 15_000 })
   const db = getDb()
-  const words = groundTerms(parseLearnReply(res.text), edits, db.terms())
-  return words.filter((w) => db.addWord(w, 'auto') === 'added')
+  const named = parseLearnReply(res.text)
+  const words = groundTerms(named, edits, db.terms()).filter((w) => db.addWord(w, 'auto') === 'added')
+  // Only fixes the model judged to be spelling, new words or ones already in the
+  // dictionary: 「GPT」 changed to 「Claude」 is rewording, not a mishearing.
+  const isNamed = (t: string) => named.some((w) => typeof w === 'string' && w.trim().toLowerCase() === t.toLowerCase())
+  for (const { term, form } of heardForms(edits, db.terms().filter(isNamed))) db.addHeardAs(term, form)
+  return words
 }
 
 async function check(s: Session, onLearned: OnLearned): Promise<void> {

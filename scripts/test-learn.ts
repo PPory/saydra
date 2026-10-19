@@ -1,7 +1,7 @@
 // Dictionary auto-learn: finding the user's corrections in pasted text, and
 // accepting only grounded words from the model.
 // Usage: npm run test:learn
-import { findEdits, groundTerms } from '../src/main/learn'
+import { findEdits, groundTerms, heardForms } from '../src/main/learn'
 
 const cases: [string, boolean, unknown?][] = []
 const check = (name: string, ok: boolean, detail?: unknown) => cases.push([name, ok, detail])
@@ -50,6 +50,17 @@ check('word that was already pasted dropped', groundTerms(['团队'], edits, [])
 check('known word dropped (any case)', groundTerms(['claude code'], edits, ['Claude Code']).length === 0)
 check('sentence-like answer dropped', groundTerms(['辛禾，'], edits, []).length === 0)
 check('non-strings ignored', groundTerms([42, null, '辛禾'], edits, []).join() === '辛禾')
+
+// 常被识别成 from the fixes
+const forms = heardForms(edits, ['辛禾', 'Claude Code'])
+check('wrong forms of fixed words', JSON.stringify(forms) === JSON.stringify([{ term: '辛禾', form: '新和' }, { term: 'Claude Code', form: 'cloud code' }]), forms)
+const one = findEdits('我们在开花新功能', 'x我们在开花新功能', 'x我们在开发新功能')
+check('one-character CJK fix widened to the word', JSON.stringify(heardForms(one, ['开发'])) === JSON.stringify([{ term: '开发', form: '开花' }]), [one, heardForms(one, ['开发'])])
+const de = findEdits('慢慢的走', 'x慢慢的走', 'x慢慢地走')
+check('one-character form ignored', heardForms(de, ['地']).length === 0, heardForms(de, ['地']))
+const caseOnly = findEdits('用 claude code 写', 'x用 claude code 写', 'x用 Claude Code 写')
+check('case-only fix is not a form', heardForms(caseOnly, ['Claude Code']).length === 0, heardForms(caseOnly, ['Claude Code']))
+check('term not in the fix', heardForms(edits, ['团队']).length === 0)
 
 let failed = 0
 for (const [name, ok, detail] of cases) {

@@ -6,6 +6,7 @@ import type { DictationMode } from '../shared/keys'
 import type { AskResult, DayActivity, DictSource, DictWord, HistoryItem, HistoryStatus, HistoryTab, HomeStats } from '../shared/hub'
 import { TYPING_WPM } from '../shared/hub'
 import { countWords, dayKey } from '../shared/text'
+import type { Replacement } from './replace'
 
 export interface HistoryRow {
   id: string
@@ -67,11 +68,12 @@ create table if not exists dictionary (
 create table if not exists meta (key text primary key, value text);
 `
 
-// Columns added after the first release, as [name, definition]. Additive only:
-// older rows keep null, nothing is rewritten.
-const ADDED_COLUMNS: Array<[string, string]> = [
-  ['selected_text', 'text'],
-  ['ask_result', 'text']
+// Columns added after the first release, as [table, name, definition]. Additive
+// only: older rows keep null, nothing is rewritten.
+const ADDED_COLUMNS: Array<[string, string, string]> = [
+  ['history', 'selected_text', 'text'],
+  ['history', 'ask_result', 'text'],
+  ['dictionary', 'heard_as', 'text'] // 常被识别成: wrong forms, one per line
 ]
 
 type Row = Record<string, any>
@@ -111,7 +113,21 @@ export const toItem = (r: HistoryRow): HistoryItem => ({
   hasAudio: Boolean(r.audioPath)
 })
 
-const toWord = (r: Row): DictWord => ({ id: r.id, term: r.term, source: r.source, createdAt: r.created_at })
+const forms = (r: Row): string[] => (r.heard_as ? String(r.heard_as).split('\n') : [])
+const toWord = (r: Row): DictWord => ({ id: r.id, term: r.term, heardAs: forms(r), source: r.source, createdAt: r.created_at })
+
+// Wrong forms as stored: trimmed, no repeats, never the word itself.
+function cleanForms(term: string, heardAs: string[]): string[] | 'too-long' {
+  const out: string[] = []
+  for (const raw of heardAs) {
+    const f = raw.trim()
+    if (!f || f.toLowerCase() === term.toLowerCase() || out.some((o) => o.toLowerCase() === f.toLowerCase())) continue
+    if (f.length > MAX_TERM_CHARS) return 'too-long'
+    out.push(f)
+  }
+  return out
+}
+const storeForms = (list: string[]) => (list.length ? list.join('\n') : null)
 
 // Consecutive-day runs over sorted day keys.
 function streaks(days: string[], today: string): { current: number; longest: number } {
@@ -142,8 +158,10 @@ export function openDb(file: string) {
   const db = new DatabaseSync(file)
   db.exec('pragma journal_mode = wal')
   db.exec(SCHEMA)
-  const have = new Set((db.prepare('pragma table_info(history)').all() as Row[]).map((c) => c.name))
-  for (const [name, def] of ADDED_COLUMNS) if (!have.has(name)) db.exec(`alter table history add column ${name} ${def}`)
+  for (const [table, name, def] of ADDED_COLUMNS) {
+    const have = (db.prepare(`pragma table_info(${table})`).all() as Row[]).some((c) => c.name === name)
+    if (!have) db.exec(`alter table ${table} add column ${name} ${def}`)
+  }
 
   const upsert = db.prepare(`
     insert into history (id, mode, status, raw_text, refined_text, app, title, scene, asr_engine, model,
@@ -212,11 +230,20 @@ export function openDb(file: string) {
     return audio
   }
 
-  function addWord(raw: string, source: DictSource = 'manual', now = Date.now()): 'added' | 'exists' | 'empty' | 'too-long' {
+  function addWord(
+    raw: string,
+    source: DictSource = 'manual',
+    now = Date.now(),
+    heardAs: string[] = []
+  ): 'added' | 'exists' | 'empty' | 'too-long' {
     const term = raw.trim()
     if (!term) return 'empty'
     if (term.length > MAX_TERM_CHARS) return 'too-long'
-    const res = db.prepare('insert or ignore into dictionary (term, source, created_at) values (?, ?, ?)').run(term, source, now)
+    const list = cleanForms(term, heardAs)
+    if (list === 'too-long') return 'too-long'
+    const res = db
+      .prepare('insert or ignore into dictionary (term, source, created_at, heard_as) values (?, ?, ?, ?)')
+      .run(term, source, now, storeForms(list))
     return res.changes ? 'added' : 'exists'
   }
 
@@ -287,8 +314,8 @@ export function openDb(file: string) {
       const conds: string[] = []
       const params: any[] = []
       if (query.trim()) {
-        conds.push('term like ?')
-        params.push(`%${query.trim()}%`)
+        conds.push('(term like ? or heard_as like ?)')
+        params.push(`%${query.trim()}%`, `%${query.trim()}%`)
       }
       if (source) {
         conds.push('source = ?')
@@ -304,14 +331,33 @@ export function openDb(file: string) {
       return transaction(() => terms.filter((t) => addWord(t, source) === 'added').length)
     },
 
-    updateWord(id: number, raw: string): 'ok' | 'exists' | 'empty' | 'too-long' {
+    updateWord(id: number, raw: string, heardAs: string[] = []): 'ok' | 'exists' | 'empty' | 'too-long' {
       const term = raw.trim()
       if (!term) return 'empty'
       if (term.length > MAX_TERM_CHARS) return 'too-long'
+      const list = cleanForms(term, heardAs)
+      if (list === 'too-long') return 'too-long'
       const clash = db.prepare('select id from dictionary where term = ? and id != ?').get(term, id)
       if (clash) return 'exists'
-      db.prepare('update dictionary set term = ? where id = ?').run(term, id)
+      db.prepare('update dictionary set term = ?, heard_as = ? where id = ?').run(term, storeForms(list), id)
       return 'ok'
+    },
+
+    // Auto-learn: the user replaced `form` with a dictionary word. False if already known.
+    addHeardAs(term: string, form: string): boolean {
+      const row = db.prepare('select * from dictionary where term = ?').get(term) as Row | undefined
+      if (!row) return false
+      const before = forms(row)
+      const list = cleanForms(row.term, [...before, form])
+      if (list === 'too-long' || list.length === before.length) return false
+      db.prepare('update dictionary set heard_as = ? where id = ?').run(storeForms(list), row.id)
+      return true
+    },
+
+    // Every 常被识别成 form with its word, oldest word first.
+    replacements(): Replacement[] {
+      const rows = db.prepare('select term, heard_as from dictionary where heard_as is not null order by created_at').all() as Row[]
+      return rows.flatMap((r) => forms(r).map((from) => ({ from, to: r.term })))
     },
 
     deleteWords(ids: number[]): number {

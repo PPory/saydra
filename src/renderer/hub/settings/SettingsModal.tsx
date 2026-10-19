@@ -1,7 +1,7 @@
 // Settings dialog over the hub: 设置, 模型服务, 关于.
 import { useEffect, useState } from 'preact/hooks'
 import type { AppInfo, Appearance } from '../../../shared/hub'
-import type { Shortcut, ShortcutBindings } from '../../../shared/keys'
+import { IS_MAC, type Shortcut, type ShortcutBindings } from '../../../shared/keys'
 import type { AsrEngine, PublicSettings, RefineProvider } from '../../../shared/types'
 import { Button, Icon, IconButton, Segmented, Switch, type IconName } from '../ui'
 import { MicModal, Row, Section, ShortcutInput, TranslationLanguages } from './Controls'
@@ -79,7 +79,10 @@ function GeneralPage({ s, save }: { s: PublicSettings; save: Save }) {
             ]}
           />
         </Row>
-        <Row title="登录时启动应用" description="当您的计算机启动时自动打开 Saydra（在托盘里安静运行）。">
+        <Row
+          title="登录时启动应用"
+          description={`当您的计算机启动时自动打开 Saydra（在${IS_MAC ? '菜单栏' : '托盘'}里安静运行）。`}
+        >
           <Switch label="登录时启动应用" checked={s.launchAtLogin} onChange={(v) => save({ launchAtLogin: v })} />
         </Row>
         <Row title="常驻浮条" description="在屏幕底部常驻语音浮条，点一下即可开始说话。关闭后只在说话时出现。">

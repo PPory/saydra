@@ -41,6 +41,7 @@ export type BarActionName =
   | 'add-language' // 翻译为 chip: open settings to pick more target languages
   | 'undo-learn' // remove the words auto-learn just added
   | 'copy-last' // 复制最后的转录: the paste went nowhere, copy it on request
+  | 'open-permissions' // macOS: a permission the shortcuts need is missing
   | 'dismiss'
 
 export interface AlertAction {

@@ -1,9 +1,16 @@
-import { BrowserWindow, ipcMain, nativeTheme, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, screen } from 'electron'
 import { HUB, type HubRoute } from '../shared/hub'
 import { IPC, type AnswerPayload } from '../shared/types'
 import { join } from 'node:path'
 
 const preload = join(import.meta.dirname, '../preload/index.cjs')
+const isMac = process.platform === 'darwin'
+
+// macOS: a non-activating panel that also shows over full-screen apps and on every
+// Space; without this the bar disappears as soon as the user goes full screen.
+function floatEverywhere(win: BrowserWindow): void {
+  if (isMac) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+}
 
 function load(win: BrowserWindow, page: string): void {
   const devUrl = process.env.ELECTRON_RENDERER_URL
@@ -32,9 +39,11 @@ export function createFloatingBar(): BrowserWindow {
     skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: false,
+    ...(isMac && { type: 'panel' }),
     webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false }
   })
   win.setAlwaysOnTop(true, 'screen-saver')
+  floatEverywhere(win)
   setBarInteractive(win, false)
   load(win, 'floating-bar')
   win.once('ready-to-show', () => {
@@ -51,7 +60,21 @@ export function setBarInteractive(win: BrowserWindow, interactive: boolean): voi
   else win.setIgnoreMouseEvents(true, { forward: true })
 }
 
-// Bottom-centre of the display the cursor is on, just above the taskbar.
+// Before each dictation: other always-on-top windows (shell flyouts, screenshot
+// tools, video players) can end up above the bar, and Show Desktop can hide it.
+// Puts it back on top without taking focus; returns what was wrong, for the log.
+export function raiseBar(win: BrowserWindow): string[] {
+  const wrong: string[] = []
+  if (win.isMinimized()) wrong.push('minimized')
+  if (!win.isVisible()) wrong.push('hidden')
+  if (!win.isAlwaysOnTop()) wrong.push('not-on-top')
+  if (wrong.length) win.showInactive()
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.moveTop()
+  return wrong
+}
+
+// Bottom-centre of the display the cursor is on, just above the taskbar (or the Dock).
 export function placeBar(win: BrowserWindow): void {
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   win.setBounds({
@@ -106,9 +129,11 @@ export function showAnswerCard(payload: AnswerPayload): void {
     alwaysOnTop: true,
     hasShadow: false,
     title: '回答',
+    ...(isMac && { type: 'panel' }),
     webPreferences: { preload, sandbox: true, contextIsolation: true }
   })
   win.setAlwaysOnTop(true, 'pop-up-menu')
+  floatEverywhere(win)
   cardWin = win
   win.on('closed', () => (cardWin = null))
   load(win, 'answer-card') // the page asks for the payload once it is listening
@@ -143,6 +168,7 @@ export function openHub(route?: HubRoute): void {
   if (existing) {
     if (route) existing.webContents.send(HUB.navigate, route)
     if (existing.isMinimized()) existing.restore()
+    if (isMac) app.focus({ steal: true }) // a menu-bar app is never the active one by itself
     existing.show()
     existing.focus()
     return
@@ -157,11 +183,15 @@ export function openHub(route?: HubRoute): void {
     show: false,
     backgroundColor: c.bg,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: c.bg, symbolColor: c.symbol, height: 40 },
+    // Windows draws its buttons over the page; macOS keeps its traffic lights, placed in the sidebar.
+    ...(isMac ? { trafficLightPosition: { x: 24, y: 24 } } : { titleBarOverlay: { color: c.bg, symbolColor: c.symbol, height: 40 } }),
     webPreferences: { preload, sandbox: true, contextIsolation: true }
   })
   hubWin = win
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    if (isMac) app.focus({ steal: true })
+    win.show()
+  })
   win.on('closed', () => (hubWin = null))
   if (route) win.webContents.once('did-finish-load', () => win.webContents.send(HUB.navigate, route))
   load(win, 'hub')
@@ -172,5 +202,5 @@ nativeTheme.on('updated', () => {
   if (!win) return
   const c = hubColors()
   win.setBackgroundColor(c.bg)
-  win.setTitleBarOverlay({ color: c.bg, symbolColor: c.symbol, height: 40 })
+  if (!isMac) win.setTitleBarOverlay({ color: c.bg, symbolColor: c.symbol, height: 40 })
 })

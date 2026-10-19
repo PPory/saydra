@@ -286,6 +286,16 @@ body,
   background: rgba(242, 241, 240, 0.25);
   transition: width 100ms linear;
 }
+/* soft tail ahead of the fill: a waiting 80–99% reads as still going, not cut off */
+.progress i::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 18px;
+  background: linear-gradient(90deg, rgba(242, 241, 240, 0.25), transparent);
+}
 .shimmer {
   position: relative;
   z-index: 1;

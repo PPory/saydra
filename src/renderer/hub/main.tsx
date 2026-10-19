@@ -4,9 +4,11 @@ import '@fontsource/prompt/500.css'
 import { render } from 'preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
 import type { HubChange, HubPage, HubRoute } from '../../shared/hub'
+import { IS_MAC } from '../../shared/keys'
 import { Dictionary } from './pages/Dictionary'
 import { History } from './pages/History'
 import { Home } from './pages/Home'
+import { PermissionsModal } from './Permissions'
 import { SettingsModal, type SettingsPage } from './settings/SettingsModal'
 import { Welcome } from './Welcome'
 import { Icon, Logo, ToastProvider, type IconName } from './ui'
@@ -19,6 +21,9 @@ const NAV: { key: HubPage; label: string; icon: IconName }[] = [
   { key: 'dictionary', label: '词典', icon: 'book' }
 ]
 const PAGE_KEY = 'hub.page'
+
+// macOS keeps its traffic lights at the top of the sidebar (hub.css makes room).
+if (IS_MAC) document.documentElement.classList.add('mac')
 
 function readPage(): HubPage {
   try {
@@ -33,6 +38,7 @@ function App() {
   const [page, setPage] = useState<HubPage>(readPage)
   const [settings, setSettings] = useState<SettingsPage | null>(null)
   const [welcome, setWelcome] = useState(false)
+  const [permissions, setPermissions] = useState(false)
   // Bumped when main reports a change, so pages refetch.
   const [versions, setVersions] = useState<Record<HubChange, number>>({ history: 0, dictionary: 0, settings: 0 })
 
@@ -51,6 +57,8 @@ function App() {
       if (route === 'welcome') {
         setSettings(null)
         setWelcome(true)
+      } else if (route === 'permissions') {
+        setPermissions(true)
       } else if (route === 'settings' || route === 'models' || route === 'about') {
         setWelcome(false)
         setSettings(route)
@@ -108,6 +116,7 @@ function App() {
       </main>
       {settings && <SettingsModal page={settings} onPage={setSettings} onClose={closeSettings} />}
       {welcome && <Welcome onClose={closeWelcome} />}
+      {permissions && !welcome && <PermissionsModal onClose={() => setPermissions(false)} />}
     </div>
   )
 }

@@ -2,12 +2,13 @@
 // be tested. Only a clear "no" counts as a failure: a card then offers to copy the
 // text instead of it being lost. Anything we cannot read (WeChat, custom-drawn
 // boxes, focus moving to another app) is "can't tell" and handled as before.
-import type { FocusInfo } from './win-helper'
+import type { FocusInfo } from './platform/helper'
 
 // How much text before the caret to read for the check (see pasteLanded).
 export const PASTE_CHECK_CHARS = 60
 
-// Focus on these is not a place text can go (a desktop icon, a list, a button...).
+// Windows: focus on these is not a place text can go (a desktop icon, a list, a button...).
+// macOS has no such rules yet: there only an unchanged box counts as a miss.
 const NOT_TEXT = new Set([
   'Button', 'CheckBox', 'DataItem', 'Hyperlink', 'Image', 'List', 'ListItem', 'Menu', 'MenuBar', 'MenuItem',
   'RadioButton', 'ScrollBar', 'Slider', 'Tab', 'TabItem', 'Thumb', 'TitleBar', 'ToolBar', 'Tree', 'TreeItem'
@@ -17,11 +18,16 @@ const NOT_TEXT = new Set([
 // apart by window class: desktop icon view, desktop, taskbars.
 const NOT_TEXT_CLASSES = new Set(['SysListView32', 'Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd'])
 
-const notText = (f: FocusInfo) => (!!f.type && NOT_TEXT.has(f.type)) || (!!f.cls && NOT_TEXT_CLASSES.has(f.cls))
+export const winNotText = (f: FocusInfo): boolean => (!!f.type && NOT_TEXT.has(f.type)) || (!!f.cls && NOT_TEXT_CLASSES.has(f.cls))
 
 const squash = (s: string) => s.replace(/\s+/g, '')
 
-export function pasteLanded(before: FocusInfo | null, after: FocusInfo | null, text: string): boolean | null {
+export function pasteLanded(
+  before: FocusInfo | null,
+  after: FocusInfo | null,
+  text: string,
+  notText: (f: FocusInfo) => boolean = winNotText
+): boolean | null {
   if (!before || !after || before.pid !== after.pid) return null
   if (after.text === undefined) return notText(after) && notText(before) ? false : null
   if (before.text === undefined) return null

@@ -23,6 +23,7 @@ export type DictSource = 'manual' | 'auto'
 export interface DictWord {
   id: number
   term: string
+  heardAs: string[] // 常被识别成: replaced with `term` in every transcript
   source: DictSource
   createdAt: number
 }
@@ -65,7 +66,18 @@ export type ShortcutTarget = 'dictate' | 'translate' | 'ask' | 'pasteLast'
 export type CaptureResult = { ok: true; keys: Shortcut } | { ok: false; error: string } | null // null = cancelled
 
 export type HubPage = 'home' | 'history' | 'dictionary'
-export type HubRoute = HubPage | 'settings' | 'models' | 'about' | 'welcome' // welcome: first-run guide
+// welcome: first-run guide; permissions: macOS only, when one was lost after setup
+export type HubRoute = HubPage | 'settings' | 'models' | 'about' | 'welcome' | 'permissions'
+
+// macOS permissions the app needs; fnKey is 「按下 🌐 键时：不执行任何操作」.
+export type MacPermission = 'microphone' | 'accessibility' | 'inputMonitoring' | 'fnKey'
+export interface MacPermissions {
+  microphone: boolean
+  accessibility: boolean
+  inputMonitoring: boolean
+  fnKey: boolean | null // null: no shortcut uses fn
+  hookActive: boolean // the key hook is running (it may need a restart after granting)
+}
 
 export interface AppInfo {
   version: string
@@ -89,6 +101,9 @@ export const HUB = {
   openDataDir: 'hub:open-data-dir',
   captureShortcut: 'hub:capture-shortcut',
   cancelCapture: 'hub:cancel-capture',
+  permissions: 'hub:permissions', // macOS; null elsewhere
+  grantPermission: 'hub:grant-permission',
+  relaunch: 'hub:relaunch',
   // main -> hub
   changed: 'hub:changed',
   navigate: 'hub:navigate'

@@ -1,7 +1,7 @@
 // When a paste counts as failed (then the 复制最后的转录 card offers the text).
 // Usage: npm run test:paste
 import { pasteLanded } from '../src/main/paste-check'
-import type { FocusInfo } from '../src/main/win-helper'
+import type { FocusInfo } from '../src/main/platform/helper'
 
 const said = '明天下午四点开会，记得带上周的数据。'
 const box = (text: string | undefined, extra: Partial<FocusInfo> = {}): FocusInfo => ({ pid: 100, type: 'Edit', text, ...extra })

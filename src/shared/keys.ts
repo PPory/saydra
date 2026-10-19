@@ -1,4 +1,10 @@
 // Windows virtual-key codes for shortcuts, shared by the key hook and the settings UI.
+// macOS key codes are translated to these (platform/mac-keys.ts), so saved
+// shortcuts, the hotkey state machine and the settings page work the same on both.
+
+// Main has `process`; the sandboxed pages only have the user agent.
+const nodePlatform = (globalThis as { process?: { platform?: string } }).process?.platform
+export const IS_MAC = nodePlatform ? nodePlatform === 'darwin' : /Mac/.test(globalThis.navigator?.userAgent ?? '')
 
 export const VK = {
   Backspace: 0x08,
@@ -14,7 +20,8 @@ export const VK = {
   RCtrl: 0xa3,
   LAlt: 0xa4,
   RAlt: 0xa5,
-  F24: 0x87
+  F24: 0x87,
+  Fn: 0x100 // macOS 🌐 / fn key; outside the Windows range (1-254), so never clashes
 } as const
 
 export type DictationMode = 'dictate' | 'translate' | 'ask'
@@ -29,13 +36,23 @@ export interface ShortcutBindings {
   pasteLast: Shortcut // empty = unbound
 }
 
-// Defaults on Windows.
-export const DEFAULT_BINDINGS: ShortcutBindings = {
+export const WIN_BINDINGS: ShortcutBindings = {
   dictate: [VK.RAlt],
   translate: [VK.RAlt, VK.RShift],
   ask: [VK.RAlt, VK.Space],
   pasteLast: []
 }
+
+// macOS shows the emoji picker or starts its own
+// dictation on 🌐 unless that is turned off; the welcome guide checks it.
+export const MAC_BINDINGS: ShortcutBindings = {
+  dictate: [VK.Fn],
+  translate: [VK.Fn, VK.LShift],
+  ask: [VK.Fn, VK.Space],
+  pasteLast: []
+}
+
+export const DEFAULT_BINDINGS: ShortcutBindings = IS_MAC ? MAC_BINDINGS : WIN_BINDINGS
 
 const NAMES: Record<number, string> = {
   [VK.Backspace]: 'Backspace',
@@ -64,7 +81,24 @@ const NAMES: Record<number, string> = {
   0x28: '↓'
 }
 
+// Command sits where Win does, Option where Alt does.
+const MAC_NAMES: Record<number, string> = {
+  [VK.Fn]: 'Fn',
+  [VK.LWin]: '左 ⌘ Command',
+  [VK.RWin]: '右 ⌘ Command',
+  [VK.LCtrl]: '左 ⌃ Control',
+  [VK.RCtrl]: '右 ⌃ Control',
+  [VK.LAlt]: '左 ⌥ Option',
+  [VK.RAlt]: '右 ⌥ Option',
+  [VK.LShift]: '左 ⇧ Shift',
+  [VK.RShift]: '右 ⇧ Shift',
+  [VK.Backspace]: 'Delete',
+  [VK.Enter]: 'Return',
+  0x2e: '⌦ Delete'
+}
+
 export function keyName(vk: number): string {
+  if (IS_MAC && MAC_NAMES[vk]) return MAC_NAMES[vk]
   if (NAMES[vk]) return NAMES[vk]
   if ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5a)) return String.fromCharCode(vk)
   if (vk >= 0x70 && vk <= 0x87) return `F${vk - 0x6f}`

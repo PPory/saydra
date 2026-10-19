@@ -102,6 +102,18 @@ const id = db.listWords('Typeless', null)[0].id
 check('rename clash', db.updateWord(id, 'SENSEVOICE') === 'exists')
 check('rename', db.updateWord(id, 'Typeless 2') === 'ok')
 check('batch delete', db.deleteWords(db.listWords('', 'auto').map((w) => w.id)) === 1)
+// --- 常被识别成
+check('add with heard forms', db.addWord('开发', 'manual', Date.now(), ['开花', ' 开化 ', '开花', '开发']) === 'added')
+const dev = db.listWords('开发', null)[0]
+check('forms trimmed, no repeats, never the word', dev?.heardAs.join() === '开花,开化', JSON.stringify(dev?.heardAs))
+check('search finds a form', db.listWords('开化', null).map((w) => w.term).join() === '开发')
+check('words without forms list none', db.listWords('辛禾', null)[0]?.heardAs.length === 0)
+check('form too long', db.addWord('长', 'manual', Date.now(), ['x'.repeat(61)]) === 'too-long')
+check('edit forms', db.updateWord(dev.id, '开发', ['开化']) === 'ok' && db.listWords('开发', null)[0].heardAs.join() === '开化')
+check('learn a form', db.addHeardAs('开发', '开花') && db.listWords('开发', null)[0].heardAs.join() === '开化,开花')
+check('learned form already known', !db.addHeardAs('开发', '开花') && !db.addHeardAs('没有这个词', '错'))
+check('replacements list', JSON.stringify(db.replacements()) === JSON.stringify([{ from: '开化', to: '开发' }, { from: '开花', to: '开发' }]), JSON.stringify(db.replacements()))
+check('clearing forms', db.updateWord(dev.id, '开发', []) === 'ok' && db.replacements().length === 0)
 check('split old textarea', splitDictionary('辛禾Xenho, Claude Code，Typeless\nA、B').length === 5)
 
 // --- jsonl import
@@ -138,10 +150,14 @@ old.exec(`create table history (id text primary key, mode text not null default 
   asr_engine text, model text, duration_ms integer not null default 0, voiced_ms integer, peak_rms real, transcribe_ms integer,
   refine_ms integer, words integer not null default 0, audio_path text, error text, created_at integer not null)`)
 old.exec("insert into history (id, raw_text, refined_text, words, created_at) values ('old1', '旧', '旧记录', 3, 1)")
+old.exec(`create table dictionary (id integer primary key autoincrement, term text not null unique collate nocase,
+  source text not null default 'manual', created_at integer not null)`)
+old.exec("insert into dictionary (term, created_at) values ('旧词', 1)")
 old.close()
 const upgraded = openDb(oldFile)
 const o = upgraded.getHistory('old1')
 check('old database upgraded in place', o?.refinedText === '旧记录' && o.askResult === null && o.selectedText === null)
+check('old dictionary gets 常被识别成', upgraded.listWords('', null)[0]?.heardAs.length === 0 && upgraded.addHeardAs('旧词', '久词'))
 upgraded.close()
 check('upgrade runs once', (openDb(oldFile).close(), true))
 

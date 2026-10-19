@@ -6,6 +6,13 @@ import { Button, Confirm, Icon, IconButton, Modal, Tabs, useToast } from '../ui'
 type Category = 'all' | DictSource
 const SEARCH_DEBOUNCE_MS = 300
 
+// 「广布、广部」 or one per line.
+const splitForms = (text: string): string[] =>
+  text
+    .split(/[\n,，、;；]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
 const EMPTY: Record<Category, string> = {
   all: 'Saydra 会记住您独特的名称和词汇，识别和润色时按词典里的写法输出。',
   auto: 'Saydra 会自动学习您改过的名称和词汇，并将其添加到您的个人词典中。',
@@ -23,12 +30,14 @@ function WordModal({
 }) {
   const toast = useToast()
   const [value, setValue] = useState('')
+  const [heard, setHeard] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!open) return
     setValue(word?.term ?? '')
+    setHeard(word?.heardAs.join('、') ?? '')
     setError('')
     setTimeout(() => input.current?.focus(), 0)
   }, [open, word])
@@ -37,7 +46,8 @@ function WordModal({
     e?.preventDefault()
     if (!value.trim()) return setError('请输入一个词')
     setSaving(true)
-    const res = word ? await window.rea.dictUpdate(word.id, value) : await window.rea.dictAdd(value)
+    const forms = splitForms(heard)
+    const res = word ? await window.rea.dictUpdate(word.id, value, forms) : await window.rea.dictAdd(value, forms)
     setSaving(false)
     if (!res.ok) return setError(res.message)
     toast(res.message)
@@ -65,12 +75,25 @@ function WordModal({
           value={value}
           maxLength={60}
           placeholder={word ? '编辑词汇' : '添加新词'}
+          onKeyDown={(e) => e.key === 'Enter' && !e.isComposing && void submit(e)}
           onInput={(e) => {
             setValue(e.currentTarget.value)
             setError('')
           }}
         />
         {error && <p class="field-error">{error}</p>}
+        <label class="field-label" for="dict-heard">
+          常被识别成（可选）
+        </label>
+        <input
+          id="dict-heard"
+          class="field"
+          value={heard}
+          placeholder="例如：开花、开化"
+          onInput={(e) => setHeard(e.currentTarget.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.isComposing && void submit(e)}
+        />
+        <p class="field-hint">识别结果里出现这些写法时，直接换成上面的词。多个用「、」分隔。</p>
       </form>
     </Modal>
   )
@@ -183,8 +206,15 @@ export function Dictionary({ version }: { version: number }) {
                 <label class="word-check" aria-label={`选择 ${w.term}`}>
                   <input type="checkbox" checked={selected.has(w.id)} onChange={() => toggle(w.id)} />
                 </label>
-                <span class="word-term" title={w.term}>
-                  {w.term}
+                <span class="word-main">
+                  <span class="word-term" title={w.term}>
+                    {w.term}
+                  </span>
+                  {w.heardAs.length > 0 && (
+                    <span class="word-heard" title={`常被识别成：${w.heardAs.join('、')}`}>
+                      替换 {w.heardAs.join('、')}
+                    </span>
+                  )}
                 </span>
                 {w.source === 'auto' && (
                   <span class="word-auto" data-tip="由 Saydra 自动添加">

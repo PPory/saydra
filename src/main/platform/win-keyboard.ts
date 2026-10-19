@@ -3,6 +3,7 @@
 // an app's menu bar and Right Alt+Space never opens the window menu.
 import { powerMonitor } from 'electron'
 import { createRequire } from 'node:module'
+import type { KeyListener } from '.'
 
 const require = createRequire(import.meta.url)
 
@@ -12,9 +13,6 @@ const WM_SYSKEYDOWN = 0x104
 const LLKHF_INJECTED = 0x10
 const VK_LCONTROL = 0xa2
 const ALTGR_FAKE_CTRL_SCAN = 0x21d // AltGr layouts send a fake Left Ctrl before Right Alt
-
-// Return true to swallow the event.
-export type KeyListener = (vk: number, down: boolean) => boolean
 
 export function startKeyboardHook(listener: KeyListener): () => void {
   const koffi = require('koffi')

@@ -1,10 +1,23 @@
-import { app, clipboard, ipcMain, Menu, nativeImage, nativeTheme, net, session, shell, Tray, type BrowserWindow } from 'electron'
+import {
+  app,
+  clipboard,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  net,
+  session,
+  shell,
+  systemPreferences,
+  Tray,
+  type BrowserWindow
+} from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AskResult } from '../shared/hub'
+import { HUB, type AskResult, type MacPermission } from '../shared/hub'
 import { shortcutLabel, VK, type DictationMode } from '../shared/keys'
 import { findLanguage } from '../shared/languages'
 import {
@@ -28,7 +41,6 @@ import { checkKey, LONG_TEXT_CHARS, transcribe } from './groq'
 import { createDictationKeyMachine, type DictationKeyHandlers } from './hotkey'
 import { notifyHub, registerHubIpc } from './hub'
 import { runHubShots } from './hub-shots'
-import { startKeyboardHook } from './keyboard'
 import { ApiError, chatWithFallback, listModels, setFetch } from './llm'
 import { copySelection, pasteText } from './paste'
 import { pasteLanded, PASTE_CHECK_CHARS } from './paste-check'
@@ -65,6 +77,7 @@ import {
   setTranslationActive
 } from './settings'
 import { createShortcutCapture } from './shortcut-capture'
+import { applyReplacements } from './replace'
 import { dictionaryText, getDb, openStore, pruneHistory, saveBenchRecording, saveRecording } from './store'
 import {
   closeAnswerCard,
@@ -73,12 +86,15 @@ import {
   isCardVisible,
   openHub,
   placeBar,
+  raiseBar,
   registerCardIpc,
   resizeCard,
   setBarInteractive,
   showAnswerCard
 } from './windows'
-import { focusInfo, isMuted, setMuted, startWinHelper, type FocusInfo } from './win-helper'
+import { isMac, platform } from './platform'
+import { grantMacPermission, macPermissions } from './platform/mac'
+import { focusInfo, isMuted, setMuted, startHelper, type FocusInfo } from './platform/helper'
 
 // The app was called REATypeless before: an existing install keeps its data
 // folder (settings, encrypted keys, history, dictionary) instead of starting empty.
@@ -88,11 +104,15 @@ if (existsSync(LEGACY_DATA_DIR)) app.setPath('userData', LEGACY_DATA_DIR)
 // Self-test: REA_SELFTEST_WAV=<file.wav> runs one full dictation with the wav as
 // a fake microphone, prints the result instead of pasting, then exits.
 // REA_ASR=local|groq and REA_REFINE=groq|custom force the services under test.
+// REA_SELFTEST_ASR_ONLY=1 runs without any refine service (CI has no key): the raw transcript comes out.
 const SELFTEST_WAV = process.env.REA_SELFTEST_WAV
+const SELFTEST_ASR_ONLY = Boolean(SELFTEST_WAV && process.env.REA_SELFTEST_ASR_ONLY)
 if (SELFTEST_WAV) {
   app.commandLine.appendSwitch('use-fake-device-for-media-stream')
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
   app.commandLine.appendSwitch('use-file-for-fake-audio-capture', SELFTEST_WAV)
+  // macOS sandboxes the audio service, which then cannot open the wav. Self-test only.
+  app.commandLine.appendSwitch('disable-features', 'AudioServiceSandbox')
   // Own profile: no clash with an installed instance or the user's settings.
   app.setPath('userData', join(tmpdir(), 'saydra-selftest'))
 }
@@ -227,6 +247,9 @@ interface Recognized {
   heard?: string | null // see whisperReference
 }
 
+// 词典 「常被识别成」: the user's fixed replacements.
+const applyHeardAs = (text: string): string => applyReplacements(text, getDb().replacements())
+
 // Local engine when chosen; Groq Whisper when the local one is unavailable.
 async function recognize(job: Job): Promise<Recognized> {
   if (getAsrEngine() === 'local' && !localAsrFailed()) {
@@ -234,7 +257,7 @@ async function recognize(job: Job): Promise<Recognized> {
       if (!job.pcm) throw new Error('录音解码失败')
       const said = await transcribeLocal(job.pcm)
       const heard = /[A-Za-z]/.test(said) && !job.cancelled ? await whisperReference(job) : null
-      return { raw: fixEnglishCase(said, getDb().terms()), engine: 'local', heard }
+      return { raw: applyHeardAs(fixEnglishCase(said, getDb().terms())), engine: 'local', heard }
     } catch (err) {
       if (!getApiKey()) throw err
       console.warn('local recognition failed, using Groq Whisper', err)
@@ -247,7 +270,7 @@ async function recognize(job: Job): Promise<Recognized> {
     prompt: buildWhisperPrompt(dictionaryText())
   })
   if (rawText !== text) console.info('dropped hallucinated text:', rawText)
-  return { raw: text, engine: 'groq' }
+  return { raw: applyHeardAs(text), engine: 'groq' }
 }
 
 // The audio file is written once per dictation, alongside recognition.
@@ -290,7 +313,8 @@ async function refineDictation(job: Job, { raw, engine, heard }: Recognized): Pr
     out.model = res.target.model
     // Cleanup trims fillers, never half the content; a much shorter result
     // means the model summarised, so keep the user's words instead.
-    if (res.text && res.text.length >= raw.length * 0.5) out.text = res.text
+    // Again on the result, in case the model put a misheard form back.
+    if (res.text && res.text.length >= raw.length * 0.5) out.text = applyHeardAs(res.text)
   } catch (err) {
     console.warn('refine failed, pasting raw transcript', err) // degrade, never lose the words
   }
@@ -480,11 +504,11 @@ async function checkPaste(before: Promise<FocusInfo | null> | null, text: string
   const was = await before
   if (!was) return logPasteCheck(null, null, null), null
   let now = await focusInfo(PASTE_CHECK_CHARS)
-  let landed = pasteLanded(was, now, text)
+  let landed = pasteLanded(was, now, text, platform.notText)
   if (landed === false) {
     await new Promise((r) => setTimeout(r, 400))
     now = await focusInfo(PASTE_CHECK_CHARS)
-    landed = pasteLanded(was, now, text)
+    landed = pasteLanded(was, now, text, platform.notText)
   }
   logPasteCheck(was, now, landed)
   return landed
@@ -495,12 +519,21 @@ async function checkPaste(before: Promise<FocusInfo | null> | null, text: string
 function logPasteCheck(was: FocusInfo | null, now: FocusInfo | null, landed: boolean | null): void {
   const show = (f: FocusInfo | null) =>
     f ? `${f.type ?? '?'}/${f.cls ?? '?'}/${f.text === undefined ? 'no-text' : 'text'}${f.pid === was?.pid ? '' : '/other-app'}` : 'none'
-  const file = join(app.getPath('userData'), 'paste-check.log')
-  const line = `${new Date().toISOString()} ${landed === null ? 'unknown' : landed ? 'landed' : 'missed'} before=${show(was)} after=${show(now)}\n`
+  appendLog('paste-check.log', `${landed === null ? 'unknown' : landed ? 'landed' : 'missed'} before=${show(was)} after=${show(now)}`)
+}
+
+// userData/bar.log: times the bar had to be brought back before a dictation, and
+// GPU process crashes (a transparent window can stop drawing after one).
+const logBar = (what: string) => appendLog('bar.log', what)
+
+// One timestamped line to a log in userData; the file starts over past 64 KB.
+function appendLog(name: string, text: string): void {
+  const file = join(app.getPath('userData'), name)
+  const line = `${new Date().toISOString()} ${text}\n`
   void stat(file)
     .then((st) => (st.size > 64_000 ? writeFile(file, line) : appendFile(file, line)))
     .catch(() => appendFile(file, line))
-    .catch((err) => console.warn('paste log failed', err))
+    .catch((err) => console.warn(`${name} failed`, err))
 }
 
 // The 「复制最后的转录」 card: the text in quotes and a 复制 button. It stays
@@ -670,7 +703,7 @@ function beginAsk(): void {
 const keyHandlers: DictationKeyHandlers = {
   isBusy: () => busy,
   onStart: (m) => {
-    const problem = setupProblem()
+    const problem = SELFTEST_ASR_ONLY ? null : setupProblem()
     if (problem) {
       showAlert({
         id: 'setup',
@@ -700,6 +733,8 @@ const keyHandlers: DictationKeyHandlers = {
     void getFocusContext().then((c) => (ctx = c))
     bar.webContents.send(IPC.clearAlert, null)
     placeBar(bar)
+    const wrong = raiseBar(bar)
+    if (wrong.length) logBar(`raised: ${wrong.join(',')}`)
     setView(recordingView())
     bar.webContents.send(IPC.startRecording, {
       wantPcm: getAsrEngine() === 'local',
@@ -780,6 +815,8 @@ function onBarAction(action: BarActionName): void {
       return undoLearn()
     case 'copy-last':
       return void clipboard.writeText(missedText)
+    case 'open-permissions':
+      return openHub(setupProblem() ? 'welcome' : 'permissions')
   }
 }
 
@@ -902,6 +939,98 @@ function wireIpc(): void {
     if (/^https:\/\//.test(url)) return shell.openExternal(url)
   })
   registerHubIpc({ retry: retryFromHistory, capture })
+  ipcMain.handle(HUB.permissions, () => (isMac ? macPermissions(usesFn(), Boolean(stopKeyHook)) : null))
+  ipcMain.handle(HUB.grantPermission, (_e, kind: MacPermission) => isMac && grantMacPermission(kind))
+  ipcMain.handle(HUB.relaunch, () => {
+    app.relaunch()
+    app.quit()
+  })
+}
+
+const usesFn = () => Object.values(getShortcuts()).some((keys) => keys.includes(VK.Fn))
+
+// ---------- global key hook ----------
+
+let stopKeyHook: (() => void) | null = null
+let escClosedCard = false
+
+function onKey(vk: number, down: boolean): boolean {
+  // While the settings page records a shortcut, keys go to it instead of dictation.
+  if (capture.active) return capture.key(vk, down)
+  // Esc closes the answer card (and only that: the app underneath never sees it).
+  if (vk === VK.Escape && keys.phase === 'idle') {
+    if (down && isCardVisible()) {
+      closeAnswerCard()
+      return (escClosedCard = true)
+    }
+    if (!down && escClosedCard) {
+      escClosedCard = false
+      return true
+    }
+  }
+  return keys.key(vk, down)
+}
+
+function installKeyHook(logFailure = true): boolean {
+  try {
+    stopKeyHook = platform.startKeyboardHook(onKey)
+    return true
+  } catch (err) {
+    if (logFailure) console.error('keyboard hook failed', err)
+    return false
+  }
+}
+
+const NO_ACCESS_ALERT = {
+  id: 'permission',
+  title: '需要辅助功能权限',
+  description: '没有这项权限，快捷键和自动粘贴都用不了。',
+  actions: [{ label: '去授权', action: 'open-permissions' as const, primary: true }]
+}
+const HOOK_STUCK_ALERT = {
+  id: 'permission',
+  title: '快捷键还没生效',
+  description: '辅助功能已开启，还差一步：开启「输入监控」，或重新启动 Saydra。',
+  actions: [{ label: '去处理', action: 'open-permissions' as const, primary: true }]
+}
+const HOOK_STUCK_AFTER = 3 // failed installs (2 s apart) with the permission on
+
+// macOS: the hook needs the Accessibility permission. Install it as soon as that is
+// granted, and if it is taken away later (an update can do that) or still won't
+// install, say so on the bar instead of the shortcut silently doing nothing.
+function watchMacAccess(): void {
+  let shown: object | null = null
+  let failures = 0
+  const warn = (alert: typeof NO_ACCESS_ALERT) => {
+    if (shown !== alert) showAlert(alert)
+    shown = alert
+  }
+  const check = () => {
+    if (!systemPreferences.isTrustedAccessibilityClient(false)) {
+      stopKeyHook?.()
+      stopKeyHook = null
+      failures = 0
+      return warn(NO_ACCESS_ALERT)
+    }
+    if (stopKeyHook) return
+    if (installKeyHook(failures === 0)) {
+      failures = 0
+      shown = null
+      bar.webContents.send(IPC.clearAlert, NO_ACCESS_ALERT.id)
+      notifyHub('settings')
+    } else if (++failures >= HOOK_STUCK_AFTER) warn(HOOK_STUCK_ALERT)
+  }
+  // Starts once the bar can show the card.
+  bar.webContents.once('did-finish-load', () => {
+    check()
+    setInterval(check, 2000)
+  })
+}
+
+function setUpMacApp(): void {
+  app.dock?.hide() // a menu-bar tool (the packaged app also sets LSUIElement)
+  // No visible menu bar of our own, but ⌘C / ⌘V / ⌘A in the hub's fields come from these items.
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }]))
 }
 
 function refreshTray(): void {
@@ -922,9 +1051,9 @@ function refreshTray(): void {
 }
 
 function createTray(): void {
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'tray.png')
-    : join(import.meta.dirname, '../../resources/tray.png')
+  // macOS: a black glyph the menu bar tints for light and dark (the @2x file is picked up too).
+  const file = isMac ? 'trayTemplate.png' : 'tray.png'
+  const iconPath = app.isPackaged ? join(process.resourcesPath, file) : join(import.meta.dirname, '../../resources', file)
   tray = new Tray(nativeImage.createFromPath(iconPath))
   refreshTray()
   tray.on('click', () => openHub())
@@ -955,7 +1084,7 @@ async function runAlertShots(dir: string): Promise<void> {
   await wait(600)
   const open = await bar.webContents.executeJavaScript(`document.querySelectorAll('.alert').length`)
   console.log(`  copy-last: clipboard ${(await clipboard.readText()) === said ? 'has the text' : 'WRONG'}, cards open after click ${open}`)
-  onLearned(['GPT'])
+  onLearned([process.env.REA_ALERT_LEARNED_WORD || 'GPT']) // the word is settable for promo shots
   await wait(500)
   await shoot('alert-learned')
   await wait(3000)
@@ -988,10 +1117,17 @@ async function runLearnTest(): Promise<void> {
   const learnMs = performance.now() - t
   t = performance.now()
   const info = await focusInfo(40)
-  const ok = words.includes('辛禾') && words.includes('Claude Code') && !words.includes('碰个头')
+  const forms = getDb().replacements()
+  const ok =
+    words.includes('辛禾') &&
+    words.includes('Claude Code') &&
+    !words.includes('碰个头') &&
+    forms.some((r) => r.from === '新和' && r.to === '辛禾') &&
+    forms.some((r) => r.from === 'cloud code' && r.to === 'Claude Code')
   console.log(`LEARN TEST ${ok ? 'OK' : 'FAIL'}
   learned: ${JSON.stringify(words)} in ${Math.round(learnMs)}ms
   dictionary auto: ${JSON.stringify(getDb().listWords('', 'auto').map((w) => w.term))}
+  常被识别成: ${forms.map((r) => `${r.from}→${r.to}`).join('、') || 'none'}
   helper: ${info ? `focus ${info.type} pid ${info.pid}, before ${JSON.stringify(info.before?.slice(-20) ?? null)}` : 'no readable focus'} (${Math.round(performance.now() - t)}ms)
   speakers muted: ${await isMuted()}`)
   app.exit(ok ? 0 : 1)
@@ -1006,14 +1142,15 @@ app.on('second-instance', () => openHub())
 app.on('window-all-closed', () => {}) // tray app: stay alive without windows
 
 app.whenReady().then(() => {
-  app.setAppUserModelId('local.xenho.reatypeless')
+  if (isMac) setUpMacApp()
+  else app.setAppUserModelId('local.xenho.reatypeless')
   // Route model calls through Chromium's network stack so the system proxy applies.
   setFetch(net.fetch as typeof fetch)
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media'))
   nativeTheme.themeSource = getAppearance()
   openStore()
   setInterval(() => void pruneHistory().then(() => notifyHub('history')), PRUNE_EVERY_MS)
-  startWinHelper()
+  startHelper()
   // A crash mid-dictation may have left the speakers muted by us.
   if (getMutedByApp() && !SELFTEST_WAV && !LEARN_TEST) void setMuted(false).then((ok) => ok && setMutedByApp(false))
 
@@ -1021,6 +1158,7 @@ app.whenReady().then(() => {
   if (getAsrEngine() === 'local')
     void preloadLocalAsr(modelsRoot()).catch((err) => console.warn('local ASR unavailable', err))
   bar = createFloatingBar()
+  app.on('child-process-gone', (_e, d) => d.type === 'GPU' && logBar(`gpu process gone: ${d.reason}`))
   wireIpc()
   createTray()
   if (HUB_SHOTS) return void runHubShots(getDb(), HUB_SHOTS).catch((err) => (console.error(err), app.exit(1)))
@@ -1037,7 +1175,15 @@ app.whenReady().then(() => {
         .capturePage()
         .then((img) => writeFile(join(shots, `${name}.png`), img.toPNG()))
         .catch((err) => console.warn('screenshot failed', err))
-    bar.webContents.once('did-finish-load', () => {
+    bar.webContents.once('did-finish-load', async () => {
+      // The page subscribes to IPC in an effect, a moment after load.
+      await new Promise((r) => setTimeout(r, 500))
+      // macOS: load every CoreGraphics binding and ask the helper, so a broken
+      // native call shows up on the build machine and not first on a tester's Mac.
+      if (isMac) {
+        console.log(`  mac permissions: ${JSON.stringify(await macPermissions(usesFn(), false))}`)
+        console.log(`  mac front app: ${JSON.stringify(await platform.frontApp())}`)
+      }
       const m = (process.env.REA_SELFTEST_MODE as DictationMode) || 'dictate'
       keyHandlers.onStart(m)
       setTimeout(() => shoot('1-recording'), 2000)
@@ -1057,31 +1203,13 @@ app.whenReady().then(() => {
     return
   }
 
-  try {
-    // While the settings page records a shortcut, keys go to it instead of dictation.
-    let escClosedCard = false
-    startKeyboardHook((vk, down) => {
-      if (capture.active) return capture.key(vk, down)
-      // Esc closes the answer card (and only that: the app underneath never sees it).
-      if (vk === VK.Escape && keys.phase === 'idle') {
-        if (down && isCardVisible()) {
-          closeAnswerCard()
-          return (escClosedCard = true)
-        }
-        if (!down && escClosedCard) {
-          escClosedCard = false
-          return true
-        }
-      }
-      return keys.key(vk, down)
-    })
-  } catch (err) {
-    console.error('keyboard hook failed', err)
+  if (isMac) watchMacAccess()
+  else if (!installKeyHook())
     bar.webContents.once('did-finish-load', () =>
       showAlert({ id: 'hook', title: '快捷键不可用', description: '无法安装全局键盘监听，请重启 Saydra。' })
     )
-  }
   setInterval(() => keys.timeout(), 1000)
   if (setupProblem()) openHub('welcome')
+  else if (isMac && !systemPreferences.isTrustedAccessibilityClient(false)) openHub('permissions')
   else if (!isHiddenLaunch()) openHub()
 })

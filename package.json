@@ -1,8 +1,8 @@
 {
   "name": "rea-typeless",
   "productName": "Saydra",
-  "version": "0.2.3",
-  "description": "Saydra: hold-to-talk voice dictation for Windows, powered by your own model API key",
+  "version": "0.2.4",
+  "description": "Saydra: hold-to-talk voice dictation for Windows and macOS, powered by your own model API key",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
@@ -22,7 +22,11 @@
     "test:ask": "tsx scripts/test-ask.ts",
     "test:learn": "tsx scripts/test-learn.ts",
     "test:paste": "tsx scripts/test-paste.ts",
-    "test:case": "tsx scripts/test-case.ts"
+    "test:case": "tsx scripts/test-case.ts",
+    "test:replace": "tsx scripts/test-replace.ts",
+    "test:mac-keys": "tsx scripts/test-mac-keys.ts",
+    "build:mac-helper": "mkdir -p output/mac-helper && swiftc -O -target arm64-apple-macos12 src/main/helpers/mac-helper.swift -o output/mac-helper/mac-helper",
+    "dist:mac": "npm run build:mac-helper && electron-vite build && electron-builder --mac --arm64 --config electron-builder.yml --publish never"
   },
   "dependencies": {
     "electron-store": "^12.0.0",

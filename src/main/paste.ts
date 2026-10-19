@@ -1,7 +1,5 @@
 import { clipboard, ClipboardItem } from 'electron'
-import uiohook from 'uiohook-napi'
-
-const { uIOhook, UiohookKey } = uiohook
+import { platform } from './platform'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -30,19 +28,15 @@ async function restore(snap: Snapshot): Promise<void> {
   else clipboard.clear()
 }
 
-// In a terminal Ctrl+C with nothing selected interrupts the running program.
-const TERMINALS = /^(windowsterminal|wt|cmd|powershell|pwsh|conhost|mintty|alacritty|wezterm-gui|putty|xshell|mobaxterm)\.exe$/i
-// These copy the whole current line when nothing is selected.
-const LINE_COPIERS = /^(code|cursor|windsurf|idea64|pycharm64|webstorm64|devenv|notepad\+\+|sublime_text)\.exe$/i
 const COPY_WAIT_MS = 400
 
 // The text selected in the app in front, via Ctrl+C and the clipboard (which is
 // put back afterwards); null when nothing is selected.
 export async function copySelection(appName: string | null): Promise<string | null> {
-  if (appName && TERMINALS.test(appName)) return null
+  if (appName && platform.copyInterrupts(appName)) return null
   const backup = await snapshot()
   clipboard.clear()
-  uIOhook.keyTap(UiohookKey.C, [UiohookKey.Ctrl])
+  platform.pressCopy()
   let text = ''
   for (let waited = 0; waited < COPY_WAIT_MS && !text; waited += 25) {
     await sleep(25)
@@ -51,7 +45,7 @@ export async function copySelection(appName: string | null): Promise<string | nu
   await restore(backup).catch((err) => console.warn('clipboard restore failed', err))
   if (!text.trim()) return null
   // A single line ending in a line break is an editor copying the caret's line, not a selection.
-  if (appName && LINE_COPIERS.test(appName) && /^[^\n]*\r?\n$/.test(text)) return null
+  if (appName && platform.copiesLine(appName) && /^[^\n]*\r?\n$/.test(text)) return null
   return text
 }
 
@@ -62,7 +56,7 @@ export async function pasteText(text: string, landed?: () => Promise<boolean | n
   const backup = await snapshot()
   await clipboard.writeText(text)
   await sleep(30)
-  uIOhook.keyTap(UiohookKey.V, [UiohookKey.Ctrl])
+  platform.pressPaste()
   // Give the target app time to read the clipboard before restoring it.
   await sleep(300)
   const ok = landed ? await landed().catch(() => null) : null

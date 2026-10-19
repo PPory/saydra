@@ -61,14 +61,14 @@ export function registerHubIpc(deps: { retry: (id: string) => Promise<string | n
   })
 
   ipcMain.handle(HUB.dictList, (_e, query: string, source: DictSource | null) => db().listWords(query, source))
-  ipcMain.handle(HUB.dictAdd, (_e, term: string) => {
-    const res = db().addWord(term, 'manual')
+  ipcMain.handle(HUB.dictAdd, (_e, term: string, heardAs: string[] = []) => {
+    const res = db().addWord(term, 'manual', Date.now(), heardAs)
     if (res !== 'added') return { ok: false, message: WORD_ERRORS[res] }
     notifyHub('dictionary')
     return { ok: true, message: `'${term.trim()}' 添加成功` }
   })
-  ipcMain.handle(HUB.dictUpdate, (_e, id: number, term: string) => {
-    const res = db().updateWord(id, term)
+  ipcMain.handle(HUB.dictUpdate, (_e, id: number, term: string, heardAs: string[] = []) => {
+    const res = db().updateWord(id, term, heardAs)
     if (res !== 'ok') return { ok: false, message: WORD_ERRORS[res] }
     notifyHub('dictionary')
     return { ok: true, message: `已更新 '${term.trim()}'` }

@@ -9,11 +9,6 @@ files:
   - out/**/*
   - package.json
 extraResources:
-  - from: resources/tray.png
-    to: tray.png
-  # UI Automation + speaker mute helper, run by Windows PowerShell
-  - from: src/main/helpers/win-helper.ps1
-    to: win-helper.ps1
   # Local SenseVoice model: only the two files the recognizer loads
   - from: data/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09
     to: models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09
@@ -23,14 +18,45 @@ extraResources:
 asarUnpack:
   - node_modules/uiohook-napi/**
   - node_modules/get-windows/**
-  # native addon + onnxruntime DLLs must be real files on disk
+  # native addon + onnxruntime libraries must be real files on disk
   - node_modules/sherpa-onnx-node/**
   - node_modules/sherpa-onnx-win-x64/**
+  - node_modules/sherpa-onnx-darwin-arm64/**
 win:
   target: nsis
   icon: resources/icon.png
+  extraResources:
+    - from: resources/tray.png
+      to: tray.png
+    # UI Automation + speaker mute helper, run by Windows PowerShell
+    - from: src/main/helpers/win-helper.ps1
+      to: win-helper.ps1
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: Saydra
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+  icon: resources/icon-mac.png
+  category: public.app-category.productivity
+  # No Apple developer certificate: ad-hoc signature only (Apple silicon refuses
+  # unsigned code). Hardened runtime is for notarization; without a team id it would
+  # also stop the native addons from loading.
+  identity: '-'
+  hardenedRuntime: false
+  extendInfo:
+    NSMicrophoneUsageDescription: Saydra 需要麦克风来听你说话，识别后把文字放进当前输入框。
+    LSUIElement: true # menu-bar app: no Dock icon
+  extraResources:
+    - from: resources/trayTemplate.png
+      to: trayTemplate.png
+    - from: resources/trayTemplate@2x.png
+      to: trayTemplate@2x.png
+    # Accessibility + speaker mute helper, compiled by `npm run build:mac-helper`
+    - from: output/mac-helper/mac-helper
+      to: mac-helper
+dmg:
+  title: Saydra

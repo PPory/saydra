@@ -71,8 +71,11 @@ function seed(db: Db): void {
     })
   ask('demo-ask-1', 5, '帮我解释一下什么是向量数据库，用三句话说清楚。', '**向量数据库**按语义相似度检索数据……', { askResult: 'answer' })
   ask('demo-ask-2', 9, '把这句话改得更礼貌一点。', '麻烦把文件发给我，谢谢！', { askResult: 'edit', selectedText: '把文件发我，快点。' })
-  db.addWords(['辛禾Xenho', 'Claude Code', 'Notion', 'SenseVoice', 'Saydra', 'Groq', 'CPA'])
+  db.addWords(['辛禾Xenho', 'Notion', 'SenseVoice', 'Saydra', 'Groq', 'CPA'])
   db.addWord('卜禾李', 'auto')
+  db.addWord('Claude Code', 'auto', Date.now(), ['cloud code'])
+  db.addWord('git', 'manual', Date.now(), ['get'])
+  db.addWord('场布', 'manual', Date.now(), ['广布', '广部'])
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -97,6 +100,14 @@ export async function runHubShots(db: Db, dir: string): Promise<void> {
         await wait(300)
         await writeFile(join(dir, `${theme}-home-scrolled.png`), (await win.webContents.capturePage()).toPNG())
         await win.webContents.executeJavaScript(`document.querySelector('.content').scrollTop = 0`)
+      }
+      if (route === 'dictionary') {
+        // The edit dialog of the first word, with its 常被识别成 field.
+        await win.webContents.executeJavaScript(`document.querySelector('.word-actions .icon-btn').click()`)
+        await wait(500)
+        await writeFile(join(dir, `${theme}-dictionary-edit.png`), (await win.webContents.capturePage()).toPNG())
+        await win.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+        await wait(300)
       }
       if (route === 'welcome') {
         // Step 2 of the guide for each service choice.

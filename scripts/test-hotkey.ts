@@ -1,6 +1,7 @@
 // Simulated key timelines for the dictation shortcut state machine.
+// Windows key bindings on every OS; the Fn defaults are in test-mac-keys.ts.
 // Usage: npm run test:hotkey
-import { DEFAULT_BINDINGS, shortcutError, VK, type ShortcutBindings } from '../src/shared/keys'
+import { WIN_BINDINGS, shortcutError, VK, type ShortcutBindings } from '../src/shared/keys'
 import { createDictationKeyMachine } from '../src/main/hotkey'
 import { createShortcutCapture } from '../src/main/shortcut-capture'
 
@@ -11,7 +12,7 @@ function run(steps: Step[], opts: { busy?: boolean; bindings?: ShortcutBindings 
   const eaten: string[] = []
   let t = 0
   const m = createDictationKeyMachine(
-    () => opts.bindings ?? DEFAULT_BINDINGS,
+    () => opts.bindings ?? WIN_BINDINGS,
     {
       onStart: (mode) => log.push(`start:${mode}`),
       onModeChange: (mode) => log.push(`mode:${mode}`),
@@ -54,8 +55,8 @@ const cases: Case[] = [
   ['Esc while holding cancels', [['down', A, 0], ['down', ESC, 1500], ['up', ESC, 1550], ['up', A, 1700]], ['start:dictate', 'cancel']],
   ['Esc while processing cancels it and is swallowed', [['down', ESC, 0], ['up', ESC, 50]], ['cancelProcessing'], { busy: true, eaten: ['down:1b', 'up:1b'] }],
   ['plain Shift and Esc are untouched when idle', [['down', S, 0], ['up', S, 50], ['down', ESC, 100], ['up', ESC, 150]], [], { eaten: [] }],
-  ['Right Ctrl binding is not swallowed', [['down', VK.RCtrl, 0], ['up', VK.RCtrl, 2000]], ['start:dictate', 'stop'], { bindings: { ...DEFAULT_BINDINGS, dictate: [VK.RCtrl] }, eaten: [] }],
-  ['paste-last shortcut', [['down', VK.LCtrl, 0], ['down', 0x56, 50], ['up', 0x56, 100], ['up', VK.LCtrl, 120]], ['pasteLast'], { bindings: { ...DEFAULT_BINDINGS, pasteLast: [VK.LCtrl, 0x56] } }]
+  ['Right Ctrl binding is not swallowed', [['down', VK.RCtrl, 0], ['up', VK.RCtrl, 2000]], ['start:dictate', 'stop'], { bindings: { ...WIN_BINDINGS, dictate: [VK.RCtrl] }, eaten: [] }],
+  ['paste-last shortcut', [['down', VK.LCtrl, 0], ['down', 0x56, 50], ['up', 0x56, 100], ['up', VK.LCtrl, 120]], ['pasteLast'], { bindings: { ...WIN_BINDINGS, pasteLast: [VK.LCtrl, 0x56] } }]
 ]
 
 let failed = 0
@@ -71,16 +72,16 @@ for (const [name, steps, expected, opts = {}] of cases) {
 }
 // Shortcut validation and recording (settings page).
 const extra: [string, boolean][] = [
-  ['letters only rejected', shortcutError([0x41], 'translate', DEFAULT_BINDINGS) === '快捷键不能只包含字母和数字'],
-  ['Space alone rejected', shortcutError([VK.Space], 'ask', DEFAULT_BINDINGS) !== null],
-  ['four keys rejected', shortcutError([VK.LCtrl, VK.LShift, VK.LAlt, 0x41], 'ask', DEFAULT_BINDINGS) === '快捷键必须包含3个或更少的键'],
-  ['clash rejected', shortcutError([VK.RShift, VK.RAlt], 'ask', DEFAULT_BINDINGS) === '此快捷键已在使用中'],
-  ['same binding on itself is fine', shortcutError([VK.RAlt], 'dictate', DEFAULT_BINDINGS) === null],
-  ['F-key alone accepted', shortcutError([0x78], 'pasteLast', DEFAULT_BINDINGS) === null],
-  ['Ctrl+letter accepted', shortcutError([VK.LCtrl, 0x56], 'pasteLast', DEFAULT_BINDINGS) === null]
+  ['letters only rejected', shortcutError([0x41], 'translate', WIN_BINDINGS) === '快捷键不能只包含字母和数字'],
+  ['Space alone rejected', shortcutError([VK.Space], 'ask', WIN_BINDINGS) !== null],
+  ['four keys rejected', shortcutError([VK.LCtrl, VK.LShift, VK.LAlt, 0x41], 'ask', WIN_BINDINGS) === '快捷键必须包含3个或更少的键'],
+  ['clash rejected', shortcutError([VK.RShift, VK.RAlt], 'ask', WIN_BINDINGS) === '此快捷键已在使用中'],
+  ['same binding on itself is fine', shortcutError([VK.RAlt], 'dictate', WIN_BINDINGS) === null],
+  ['F-key alone accepted', shortcutError([0x78], 'pasteLast', WIN_BINDINGS) === null],
+  ['Ctrl+letter accepted', shortcutError([VK.LCtrl, 0x56], 'pasteLast', WIN_BINDINGS) === null]
 ]
 async function captureCases(): Promise<void> {
-  const cap = createShortcutCapture(() => DEFAULT_BINDINGS)
+  const cap = createShortcutCapture(() => WIN_BINDINGS)
   let p = cap.start('pasteLast')
   const eatsAll = [cap.key(VK.LCtrl, true), cap.key(0x56, true), cap.key(0x56, false), cap.key(VK.LCtrl, false)].every(Boolean)
   let r = await p

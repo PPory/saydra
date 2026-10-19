@@ -8,6 +8,8 @@ import type {
   HomeStats,
   HubChange,
   HubRoute,
+  MacPermission,
+  MacPermissions,
   ShortcutTarget
 } from '../shared/hub'
 import type {
@@ -69,14 +71,17 @@ declare global {
       historySaveAudio(id: string): Promise<Result>
       historyAnswer(id: string): Promise<void>
       dictList(query: string, source: DictSource | null): Promise<DictWord[]>
-      dictAdd(term: string): Promise<Result>
-      dictUpdate(id: number, term: string): Promise<Result>
+      dictAdd(term: string, heardAs: string[]): Promise<Result>
+      dictUpdate(id: number, term: string, heardAs: string[]): Promise<Result>
       dictDelete(ids: number[]): Promise<number>
       dictImport(): Promise<Result>
       appInfo(): Promise<AppInfo>
       openDataDir(): Promise<void>
       captureShortcut(target: ShortcutTarget): Promise<CaptureResult>
       cancelCapture(): Promise<void>
+      permissions(): Promise<MacPermissions | null>
+      grantPermission(kind: MacPermission): Promise<void>
+      relaunch(): Promise<void>
     }
   }
 }

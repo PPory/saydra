@@ -1,13 +1,18 @@
 import type { Language } from '../shared/languages'
 import type { FocusContext, Scene } from '../shared/types'
 
-// App executables and window-title keywords that identify a scene.
-// Browsers are judged by the tab title, since Windows does not expose the URL.
+// App executables (Windows) or bundles (macOS) and window-title keywords that identify
+// a scene. Browsers are judged by the tab title: neither system gives us the URL
+// without an extra permission prompt.
 const APP_SCENES: Array<[RegExp, Scene]> = [
   [/^(wechat|weixin|qq|feishu|lark|dingtalk|slack|telegram|discord|whatsapp|teams)\.exe$/i, 'chat'],
   [/^(outlook|thunderbird|foxmail|mailmaster)\.exe$/i, 'email'],
   [/^(winword|wps|notion|obsidian|typora|onenote)\.exe$/i, 'document'],
-  [/^(code|cursor|windsurf|idea64|pycharm64|windowsterminal|wt|powershell|pwsh|cmd)\.exe$/i, 'code']
+  [/^(code|cursor|windsurf|idea64|pycharm64|windowsterminal|wt|powershell|pwsh|cmd)\.exe$/i, 'code'],
+  [/^(wechat|微信|qq|飞书|feishu|lark|钉钉|dingtalk|slack|telegram|discord|whatsapp|microsoft teams.*|messages|信息)\.app$/i, 'chat'],
+  [/^(mail|邮件|microsoft outlook|spark.*|thunderbird|foxmail)\.app$/i, 'email'],
+  [/^(microsoft word|wps office|pages|notion|obsidian|typora|microsoft onenote|notes|备忘录|bear)\.app$/i, 'document'],
+  [/^(visual studio code|cursor|windsurf|zed|xcode|intellij idea.*|pycharm.*|terminal|终端|iterm|warp|ghostty)\.app$/i, 'code']
 ]
 
 const TITLE_SCENES: Array<[RegExp, Scene]> = [

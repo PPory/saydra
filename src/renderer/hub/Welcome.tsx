@@ -1,20 +1,25 @@
 // First-run guide: pick a refine service, connect it, then dictate once for real.
 // Recognition runs on this PC with no key, so the refine service is all that needs setting up.
+// On macOS the permissions come first: without them no shortcut or paste works.
 import { useState } from 'preact/hooks'
+import { IS_MAC } from '../../shared/keys'
 import type { RefineProvider } from '../../shared/types'
+import { essentialsGranted, PermissionList, usePermissions } from './Permissions'
 import { GROQ_KEYS_URL, KeyField, ModelPicker, TryRefine, useModelList, useSettingsState } from './settings/ModelService'
 import { Button, KeyCaps, Modal } from './ui'
 
-const STEPS = 3
+type Step = 'permissions' | 'choose' | 'connect' | 'try'
+const STEPS: Step[] = IS_MAC ? ['permissions', 'choose', 'connect', 'try'] : ['choose', 'connect', 'try']
 
 export function Welcome({ onClose }: { onClose: () => void }) {
   const [s, save] = useSettingsState()
-  const [step, setStep] = useState(0)
+  const [step, setStep] = useState<Step>(STEPS[0])
   const [choice, setChoice] = useState<RefineProvider>('groq')
   const [url, setUrl] = useState('')
   // Bumped after a key or model is saved, so 「试一下」 runs on its own.
   const [savedTick, setSavedTick] = useState(0)
   const [models, setModels] = useModelList(s?.customBaseUrl ?? '', Boolean(s?.hasCustomKey))
+  const perms = usePermissions()
   if (!s) return null
 
   const ready = choice === 'groq' ? s.hasApiKey : Boolean(s.customBaseUrl && s.hasCustomKey && s.customModel)
@@ -22,30 +27,44 @@ export function Welcome({ onClose }: { onClose: () => void }) {
     setChoice(p)
     setUrl(s.customBaseUrl)
     void save({ refineProvider: p })
-    setStep(1)
+    setStep('connect')
   }
   const saved = () => setSavedTick((t) => t + 1)
 
-  const title = step === 0 ? '欢迎使用 Saydra' : step === 1 ? (choice === 'groq' ? '连接 Groq' : '连接你的 AI 服务') : '试一试'
+  const title = {
+    permissions: '欢迎使用 Saydra',
+    choose: IS_MAC ? '选一个 AI 服务' : '欢迎使用 Saydra',
+    connect: choice === 'groq' ? '连接 Groq' : '连接你的 AI 服务',
+    try: '试一试'
+  }[step]
   const footer = (
     <div class="welcome-footer">
       <span class="welcome-dots" aria-hidden="true">
-        {Array.from({ length: STEPS }, (_, i) => (
-          <i class={i === step ? 'on' : ''} />
+        {STEPS.map((k) => (
+          <i class={k === step ? 'on' : ''} />
         ))}
       </span>
-      {step === 0 && <Button onClick={onClose}>稍后设置</Button>}
-      {step === 1 && (
+      {step === 'permissions' && (
         <>
-          <Button onClick={() => setStep(0)}>上一步</Button>
-          <Button variant="primary" disabled={!ready} onClick={() => setStep(2)}>
+          <Button onClick={onClose}>稍后设置</Button>
+          <Button variant="primary" disabled={!essentialsGranted(perms)} onClick={() => setStep('choose')}>
             下一步
           </Button>
         </>
       )}
-      {step === 2 && (
+      {step === 'choose' &&
+        (IS_MAC ? <Button onClick={() => setStep('permissions')}>上一步</Button> : <Button onClick={onClose}>稍后设置</Button>)}
+      {step === 'connect' && (
         <>
-          <Button onClick={() => setStep(1)}>上一步</Button>
+          <Button onClick={() => setStep('choose')}>上一步</Button>
+          <Button variant="primary" disabled={!ready} onClick={() => setStep('try')}>
+            下一步
+          </Button>
+        </>
+      )}
+      {step === 'try' && (
+        <>
+          <Button onClick={() => setStep('connect')}>上一步</Button>
           <Button variant="primary" onClick={onClose}>
             开始使用
           </Button>
@@ -56,7 +75,16 @@ export function Welcome({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal open onClose={onClose} title={title} width={560} class="welcome" footer={footer}>
-      {step === 0 && (
+      {step === 'permissions' && (
+        <>
+          <p class="modal-desc">
+            按住快捷键说话，松开后整理好的文字会自动出现在光标处。先在 macOS 里给 Saydra 开几项权限，开好的会自动打勾：
+          </p>
+          {perms && <PermissionList p={perms} />}
+        </>
+      )}
+
+      {step === 'choose' && (
         <>
           <p class="modal-desc">
             在任何输入框里按住快捷键说话，松开后，整理好的文字会自动出现在光标处。识别在这台电脑上完成；把口语整理成文字需要一个 AI
@@ -77,7 +105,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
         </>
       )}
 
-      {step === 1 && choice === 'groq' && (
+      {step === 'connect' && choice === 'groq' && (
         <>
           <p class="modal-desc">在 Groq 官网用邮箱注册，创建一个 API key，复制后粘贴到下面。</p>
           <div>
@@ -97,7 +125,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
         </>
       )}
 
-      {step === 1 && choice === 'custom' && (
+      {step === 'connect' && choice === 'custom' && (
         <>
           <p class="modal-desc">在服务商的文档里找到 OpenAI 兼容的接口地址（一般以 /v1 结尾），再创建一个 API key。</p>
           <label class="welcome-label">服务地址</label>
@@ -138,7 +166,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
         </>
       )}
 
-      {step === 2 && (
+      {step === 'try' && (
         <>
           <p class="modal-desc welcome-keys">
             点一下下面的输入框，然后按住 <KeyCaps keys={s.shortcuts.dictate} /> 说一句话，松开后整理好的文字会出现在框里。

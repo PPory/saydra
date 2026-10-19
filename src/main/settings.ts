@@ -79,7 +79,7 @@ function encrypt(value: string): string {
 export const getApiKey = (): string => decrypt('encryptedApiKey') || process.env.GROQ_API_KEY || ''
 export const getCustomKey = (): string => decrypt('encryptedCustomKey') || process.env.REA_CUSTOM_API_KEY || ''
 export const getCustomBaseUrl = (): string => store().get('customBaseUrl') || process.env.REA_CUSTOM_BASE_URL || ''
-export const getCustomModel = (): string => store().get('customModel')
+export const getCustomModel = (): string => store().get('customModel') || process.env.REA_CUSTOM_MODEL || ''
 export const getRefineModel = (): string => store().get('refineModel')
 export const getShortcuts = (): ShortcutBindings => ({ ...DEFAULT_BINDINGS, ...store().get('shortcuts') })
 export const getInteractionSounds = (): boolean => store().get('interactionSounds')
@@ -113,7 +113,9 @@ const source = (saved: boolean, env: string | undefined) => (saved ? 'settings' 
 
 // Launch at login is the OS's setting, not ours, so read it back from there.
 const LOGIN_ARGS = ['--hidden']
-export const isHiddenLaunch = () => process.argv.includes(LOGIN_ARGS[0])
+// macOS passes no arguments to login items; it says whether it opened us instead.
+export const isHiddenLaunch = () =>
+  process.argv.includes(LOGIN_ARGS[0]) || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin)
 const getLaunchAtLogin = () => app.getLoginItemSettings({ args: LOGIN_ARGS }).openAtLogin
 function setLaunchAtLogin(on: boolean): void {
   // A dev run would register electron.exe; only the installed app may start at login.

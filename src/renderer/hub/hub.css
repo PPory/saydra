@@ -69,6 +69,9 @@ button {
   border-radius: 20px;
   background: var(--fill-thin);
 }
+.mac .sidebar-panel {
+  padding-top: 40px; /* below the traffic lights */
+}
 .logo {
   display: flex;
   align-items: center;
@@ -437,6 +440,18 @@ button {
 .field-error {
   margin-top: 6px;
   color: var(--error);
+  font-size: 12px;
+  line-height: 16px;
+}
+.field-label {
+  display: block;
+  margin: 16px 0 6px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.field-hint {
+  margin-top: 6px;
+  color: var(--text-3);
   font-size: 12px;
   line-height: 16px;
 }
@@ -1093,14 +1108,24 @@ input[type='checkbox'] {
 .word.selecting .word-check {
   display: flex;
 }
-.word-term {
+.word-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.word-term,
+.word-heard {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 14px;
   user-select: text;
+}
+.word-heard {
+  color: var(--text-3);
+  font-size: 12px;
 }
 .word-auto {
   display: flex;
@@ -1547,6 +1572,66 @@ input[type='checkbox'] {
   width: 18px;
   border-radius: 999px;
   background: var(--accent);
+}
+
+/* ---------- macOS permissions ---------- */
+.perm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-thick);
+  border-radius: 12px;
+  background: var(--bg-main);
+}
+.perm-icon {
+  color: var(--text-3);
+}
+.perm-row.ok .perm-icon {
+  color: var(--success);
+}
+.perm-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.perm-title {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.perm-desc {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-3);
+}
+.perm-done {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--success);
+}
+.perm-stuck {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--fill-thin);
+  font-size: 13px;
+  line-height: 20px;
+}
+.perm-stuck-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* ---------- 翻译目标 ---------- */
