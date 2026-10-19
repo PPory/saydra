@@ -19,6 +19,8 @@ interface Schema {
   customBaseUrl: string // OpenAI-compatible gateway, e.g. CPA
   encryptedCustomKey: string
   customModel: string
+  encryptedSiliconflowKey: string // 硅基流动, for cloud recognition
+  refineNotes: string // the user's own instructions, appended to the refine prompt
   shortcuts: ShortcutBindings
   interactionSounds: boolean
   appearance: Appearance
@@ -28,6 +30,7 @@ interface Schema {
   translationActive: string // the one picked on the bar's 「翻译为」 chip
   muteWhileDictating: boolean
   showIdleBar: boolean // the idle handle stays on screen; off = only while dictating
+  autoUpdate: boolean // check GitHub releases on start and every few hours
   mutedByApp: boolean // we muted the speakers; undo it after a crash
 }
 
@@ -46,6 +49,8 @@ const createStore = () => new Store<Schema>({
     customBaseUrl: '',
     encryptedCustomKey: '',
     customModel: DEFAULT_CUSTOM_MODEL,
+    encryptedSiliconflowKey: '',
+    refineNotes: '',
     shortcuts: DEFAULT_BINDINGS,
     interactionSounds: true,
     appearance: 'system',
@@ -55,11 +60,12 @@ const createStore = () => new Store<Schema>({
     translationActive: 'en',
     muteWhileDictating: true,
     showIdleBar: true,
+    autoUpdate: true,
     mutedByApp: false
   }
 })
 
-function decrypt(field: 'encryptedApiKey' | 'encryptedCustomKey'): string {
+function decrypt(field: 'encryptedApiKey' | 'encryptedCustomKey' | 'encryptedSiliconflowKey'): string {
   const enc = store().get(field)
   if (!enc || !safeStorage.isEncryptionAvailable()) return ''
   try {
@@ -78,9 +84,12 @@ function encrypt(value: string): string {
 // The self-test may force an engine or provider without changing saved settings.
 export const getApiKey = (): string => decrypt('encryptedApiKey') || process.env.GROQ_API_KEY || ''
 export const getCustomKey = (): string => decrypt('encryptedCustomKey') || process.env.REA_CUSTOM_API_KEY || ''
+export const getSiliconflowKey = (): string => decrypt('encryptedSiliconflowKey') || process.env.REA_SF_API_KEY || ''
 export const getCustomBaseUrl = (): string => store().get('customBaseUrl') || process.env.REA_CUSTOM_BASE_URL || ''
 export const getCustomModel = (): string => store().get('customModel') || process.env.REA_CUSTOM_MODEL || ''
 export const getRefineModel = (): string => store().get('refineModel')
+export const REFINE_NOTES_MAX = 500
+export const getRefineNotes = (): string => store().get('refineNotes')
 export const getShortcuts = (): ShortcutBindings => ({ ...DEFAULT_BINDINGS, ...store().get('shortcuts') })
 export const getInteractionSounds = (): boolean => store().get('interactionSounds')
 export const getLegacyDictionary = (): string => store().get('dictionary')
@@ -102,6 +111,7 @@ export function setTranslationActive(code: string): void {
 }
 export const getMuteWhileDictating = (): boolean => store().get('muteWhileDictating')
 export const getShowIdleBar = (): boolean => store().get('showIdleBar')
+export const getAutoUpdate = (): boolean => store().get('autoUpdate')
 export const getMutedByApp = (): boolean => store().get('mutedByApp')
 export const setMutedByApp = (on: boolean): void => store().set('mutedByApp', on)
 export const getSaveRecordings = (): boolean => store().get('saveRecordings')
@@ -131,11 +141,14 @@ export function getPublicSettings(): PublicSettings {
     refineModel: store().get('refineModel'),
     saveRecordings: store().get('saveRecordings'),
     asrEngine: store().get('asrEngine'),
+    hasSiliconflowKey: Boolean(getSiliconflowKey()),
+    siliconflowKeySource: source(Boolean(decrypt('encryptedSiliconflowKey')), process.env.REA_SF_API_KEY),
     refineProvider: store().get('refineProvider'),
     customBaseUrl: getCustomBaseUrl(),
     hasCustomKey: Boolean(getCustomKey()),
     customKeySource: source(customSaved, process.env.REA_CUSTOM_API_KEY),
     customModel: store().get('customModel'),
+    refineNotes: getRefineNotes(),
     shortcuts: getShortcuts(),
     interactionSounds: store().get('interactionSounds'),
     appearance: store().get('appearance'),
@@ -144,16 +157,19 @@ export function getPublicSettings(): PublicSettings {
     launchAtLogin: getLaunchAtLogin(),
     translationLanguages: getTranslationLanguages(),
     muteWhileDictating: store().get('muteWhileDictating'),
-    showIdleBar: store().get('showIdleBar')
+    showIdleBar: store().get('showIdleBar'),
+    autoUpdate: store().get('autoUpdate')
   }
 }
 
 export function saveSettings(input: SettingsInput): void {
   if (input.apiKey?.trim()) store().set('encryptedApiKey', encrypt(input.apiKey.trim()))
   if (input.customApiKey?.trim()) store().set('encryptedCustomKey', encrypt(input.customApiKey.trim()))
+  if (input.siliconflowKey?.trim()) store().set('encryptedSiliconflowKey', encrypt(input.siliconflowKey.trim()))
   if (input.customBaseUrl !== undefined) store().set('customBaseUrl', input.customBaseUrl.trim().replace(/\/$/, ''))
   if (input.customModel !== undefined) store().set('customModel', input.customModel.trim())
   if (input.refineModel) store().set('refineModel', input.refineModel)
+  if (input.refineNotes !== undefined) store().set('refineNotes', input.refineNotes.trim().slice(0, REFINE_NOTES_MAX))
   if (input.saveRecordings !== undefined) store().set('saveRecordings', input.saveRecordings)
   if (input.asrEngine) store().set('asrEngine', input.asrEngine)
   if (input.refineProvider) store().set('refineProvider', input.refineProvider)
@@ -165,6 +181,7 @@ export function saveSettings(input: SettingsInput): void {
   if (input.launchAtLogin !== undefined) setLaunchAtLogin(input.launchAtLogin)
   if (input.muteWhileDictating !== undefined) store().set('muteWhileDictating', input.muteWhileDictating)
   if (input.showIdleBar !== undefined) store().set('showIdleBar', input.showIdleBar)
+  if (input.autoUpdate !== undefined) store().set('autoUpdate', input.autoUpdate)
   if (input.translationLanguages) {
     const before = getTranslationLanguages()
     const codes = [...new Set(input.translationLanguages)].filter((c) => findLanguage(c)).slice(0, MAX_TRANSLATE_LANGUAGES)

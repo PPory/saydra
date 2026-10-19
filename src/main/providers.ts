@@ -2,6 +2,7 @@
 import { groqEndpoint, refineModelFor } from './groq'
 import { apiRequest, type ChatTarget, type Endpoint } from './llm'
 import { localAsrFailed } from './asr'
+import { siliconflowEndpoint } from './siliconflow'
 import {
   getApiKey,
   getAsrEngine,
@@ -9,7 +10,8 @@ import {
   getCustomKey,
   getCustomModel,
   getRefineModel,
-  getRefineProvider
+  getRefineProvider,
+  getSiliconflowKey
 } from './settings'
 import type { RefineProvider } from '../shared/types'
 
@@ -43,6 +45,7 @@ export function refineTargets(chars: number): ChatTarget[] {
 export function setupProblem(): string | null {
   const engine = getAsrEngine()
   if (engine === 'groq' && !getApiKey()) return '还没填 Groq API key，已打开设置'
+  if (engine === 'siliconflow' && !getSiliconflowKey()) return '还没填硅基流动 API key，已打开设置'
   if (engine === 'local' && localAsrFailed() && !getApiKey())
     return `本地识别模型加载失败（${localAsrFailed()!.message}），请在设置里改用 Groq`
   if (!refineTargets(0).length)
@@ -58,6 +61,7 @@ const warmedAt = new Map<string, number>()
 export function warmUpConnections(): void {
   const endpoints = refineTargets(0).map((t) => t.endpoint)
   if (getAsrEngine() === 'groq' && getApiKey()) endpoints.push(groqEndpoint(getApiKey()))
+  if (getAsrEngine() === 'siliconflow' && getSiliconflowKey()) endpoints.push(siliconflowEndpoint(getSiliconflowKey()))
   for (const ep of endpoints) {
     const last = warmedAt.get(ep.baseUrl) ?? 0
     if (Date.now() - last < 60_000) continue

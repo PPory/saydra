@@ -27,6 +27,9 @@ export interface Platform {
   // Focus is on something text cannot go into (see paste-check.ts).
   notText(f: FocusInfo): boolean
   frontApp(): Promise<FrontApp | null>
+  // Clipboard formats that tell clipboard history, cloud sync and clipboard managers
+  // to skip this content (see paste.ts).
+  transientFormats: string[]
 }
 
 export const isMac = process.platform === 'darwin'

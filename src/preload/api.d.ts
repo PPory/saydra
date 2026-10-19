@@ -10,7 +10,8 @@ import type {
   HubRoute,
   MacPermission,
   MacPermissions,
-  ShortcutTarget
+  ShortcutTarget,
+  UpdateState
 } from '../shared/hub'
 import type {
   AnswerPayload,
@@ -58,6 +59,7 @@ declare global {
       saveSettings(input: SettingsInput): Promise<void>
       testConnection(apiKey?: string): Promise<TestResult>
       testCustom(baseUrl: string, apiKey?: string): Promise<TestResult>
+      testSiliconflow(apiKey?: string): Promise<TestResult>
       tryRefine(provider: RefineProvider): Promise<TryRefineResult>
       openExternal(url: string): Promise<void>
       // hub
@@ -82,6 +84,10 @@ declare global {
       permissions(): Promise<MacPermissions | null>
       grantPermission(kind: MacPermission): Promise<void>
       relaunch(): Promise<void>
+      updateState(): Promise<UpdateState>
+      updateCheck(): Promise<void>
+      updateInstall(): Promise<void>
+      onUpdateChanged(cb: (s: UpdateState) => void): void
     }
   }
 }

@@ -22,10 +22,37 @@ async function snapshot(): Promise<Snapshot> {
   }
 }
 
+// The text is on the clipboard for a fraction of a second, and the restored content
+// was recorded when the user copied it: both are marked so clipboard history
+// (Win+V), cloud sync and clipboard managers don't log every dictation or a duplicate.
+const transient = (): Record<string, Blob> =>
+  Object.fromEntries(
+    platform.transientFormats.map((f) => [`electron application/osclipboard;format="${f}"`, new Blob([new Uint8Array(4)])])
+  )
+
+async function writeTransientText(text: string): Promise<void> {
+  try {
+    await clipboard.write([new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }), ...transient() })])
+  } catch (err) {
+    console.warn('transient clipboard write failed', err)
+    await clipboard.writeText(text)
+  }
+}
+
+// OLE's bookkeeping for the copy we replaced: it points at a data object that is gone,
+// and makes OLE readers list only the original formats (not our transient marks).
+const STALE = /format="(DataObject|Ole Private Data)"/
+
 async function restore(snap: Snapshot): Promise<void> {
-  const items = snap.filter((e) => Object.keys(e).length).map((e) => new ClipboardItem(e as Record<string, Blob>))
-  if (items.length) await clipboard.write(items)
-  else clipboard.clear()
+  const entries = snap
+    .map((e) => Object.fromEntries(Object.entries(e).filter(([type]) => !STALE.test(type))))
+    .filter((e) => Object.keys(e).length)
+  if (!entries.length) return clipboard.clear()
+  try {
+    await clipboard.write(entries.map((e, i) => new ClipboardItem({ ...(i ? {} : transient()), ...(e as Record<string, Blob>) })))
+  } catch {
+    await clipboard.write(entries.map((e) => new ClipboardItem(e as Record<string, Blob>)))
+  }
 }
 
 const COPY_WAIT_MS = 400
@@ -54,7 +81,7 @@ export async function copySelection(appName: string | null): Promise<string | nu
 // offers 复制 when it didn't. The clipboard is restored either way.
 export async function pasteText(text: string, landed?: () => Promise<boolean | null>): Promise<boolean | null> {
   const backup = await snapshot()
-  await clipboard.writeText(text)
+  await writeTransientText(text)
   await sleep(30)
   platform.pressPaste()
   // Give the target app time to read the clipboard before restoring it.

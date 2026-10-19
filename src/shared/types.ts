@@ -42,6 +42,7 @@ export type BarActionName =
   | 'undo-learn' // remove the words auto-learn just added
   | 'copy-last' // 复制最后的转录: the paste went nowhere, copy it on request
   | 'open-permissions' // macOS: a permission the shortcuts need is missing
+  | 'install-update' // a downloaded update: restart into it
   | 'dismiss'
 
 export interface AlertAction {
@@ -73,7 +74,8 @@ export interface VoiceStats {
   peakRms: number
 }
 
-export type AsrEngine = 'local' | 'groq'
+// siliconflow: the same SenseVoice in 硅基流动's cloud, so the local model stays unloaded
+export type AsrEngine = 'local' | 'siliconflow' | 'groq'
 export type RefineProvider = 'groq' | 'custom'
 export type KeySource = 'settings' | 'env' | 'none'
 
@@ -83,11 +85,14 @@ export interface PublicSettings {
   refineModel: string // Groq refine model
   saveRecordings: boolean
   asrEngine: AsrEngine
+  hasSiliconflowKey: boolean
+  siliconflowKeySource: KeySource
   refineProvider: RefineProvider
   customBaseUrl: string
   hasCustomKey: boolean
   customKeySource: KeySource
   customModel: string
+  refineNotes: string // the user's own instructions for refine
   shortcuts: ShortcutBindings
   interactionSounds: boolean
   appearance: Appearance
@@ -97,6 +102,7 @@ export interface PublicSettings {
   translationLanguages: string[]
   muteWhileDictating: boolean
   showIdleBar: boolean
+  autoUpdate: boolean
 }
 
 export interface SettingsInput {
@@ -104,10 +110,12 @@ export interface SettingsInput {
   refineModel?: string
   saveRecordings?: boolean
   asrEngine?: AsrEngine
+  siliconflowKey?: string
   refineProvider?: RefineProvider
   customBaseUrl?: string
   customApiKey?: string
   customModel?: string
+  refineNotes?: string
   shortcuts?: ShortcutBindings
   interactionSounds?: boolean
   appearance?: Appearance
@@ -117,6 +125,7 @@ export interface SettingsInput {
   translationLanguages?: string[]
   muteWhileDictating?: boolean
   showIdleBar?: boolean
+  autoUpdate?: boolean
 }
 
 // What the bar must capture besides the webm: decoded 16 kHz PCM for the local engine.
@@ -175,6 +184,7 @@ export const IPC = {
   saveSettings: 'settings:save',
   testConnection: 'settings:test',
   testCustom: 'settings:test-custom',
+  testSiliconflow: 'settings:test-siliconflow',
   tryRefine: 'settings:try-refine',
   openExternal: 'app:open-external'
 } as const

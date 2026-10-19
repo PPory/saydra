@@ -1,6 +1,6 @@
 // Settings dialog over the hub: 设置, 模型服务, 关于.
 import { useEffect, useState } from 'preact/hooks'
-import type { AppInfo, Appearance } from '../../../shared/hub'
+import type { AppInfo, Appearance, UpdateState } from '../../../shared/hub'
 import { IS_MAC, type Shortcut, type ShortcutBindings } from '../../../shared/keys'
 import type { AsrEngine, PublicSettings, RefineProvider } from '../../../shared/types'
 import { Button, Icon, IconButton, Segmented, Switch, type IconName } from '../ui'
@@ -88,6 +88,12 @@ function GeneralPage({ s, save }: { s: PublicSettings; save: Save }) {
         <Row title="常驻浮条" description="在屏幕底部常驻语音浮条，点一下即可开始说话。关闭后只在说话时出现。">
           <Switch label="常驻浮条" checked={s.showIdleBar} onChange={(v) => save({ showIdleBar: v })} />
         </Row>
+        <Row
+          title="自动检查更新"
+          description={IS_MAC ? '有新版本时在「关于」里提醒你去下载。' : '有新版本时在后台下载好，重启 Saydra 即可更新。'}
+        >
+          <Switch label="自动检查更新" checked={s.autoUpdate} onChange={(v) => save({ autoUpdate: v })} />
+        </Row>
       </Section>
       <MicModal
         open={micOpen}
@@ -99,6 +105,33 @@ function GeneralPage({ s, save }: { s: PublicSettings; save: Save }) {
         }}
       />
     </div>
+  )
+}
+
+const SILICONFLOW_KEYS_URL = 'https://cloud.siliconflow.cn/account/ak'
+
+const ASR_HINT: Record<AsrEngine, string> = {
+  local: '在电脑上识别，不联网、不上传录音，约占 300MB 内存。',
+  siliconflow: '和本机识别是同一个模型，准确度一样，不占内存；需要联网，录音会上传到硅基流动。从本机识别切过来，重启 Saydra 后才会释放内存。',
+  groq: 'Whisper 英文好，但中文错字明显更多，一般不推荐。需要 Groq key 和代理。'
+}
+
+// Added to the end of the refine prompt; the built-in rules stay in place, so a
+// note can't break the output format and later prompt fixes still reach everyone.
+function RefineNotes({ value, save }: { value: string; save: Save }) {
+  const [text, setText] = useState(value)
+  useEffect(() => setText(value), [value])
+  return (
+    <Row title="我的整理要求" description="写给 AI 的补充要求，口述整理时会照做。和默认的排版风格冲突时，以这里为准。下面「试一下」可以看效果。" top>
+      <textarea
+        class="field wide refine-notes"
+        maxLength={500}
+        value={text}
+        placeholder={'比如：\n英文术语不要翻译，保持原样\n结尾不要加句号\n「咱们」都写成「我们」'}
+        onInput={(e) => setText(e.currentTarget.value)}
+        onBlur={() => text.trim() !== value && save({ refineNotes: text }, text.trim() ? '整理要求已保存' : '已清空整理要求')}
+      />
+    </Row>
   )
 }
 
@@ -116,9 +149,10 @@ function ModelsPage({ s, save }: { s: PublicSettings; save: Save }) {
     <div class="set-page">
       <h2 class="set-title">模型服务</h2>
       <Section icon="mic" title="识别与润色">
-        <Row title="语音识别" description="本机识别更准、更快、不联网，约占 300MB 内存；云端识别不占电脑算力，需要 Groq key。">
+        <Row title="语音识别" description={ASR_HINT[s.asrEngine]}>
           <select class="field select" value={s.asrEngine} onChange={(e) => save({ asrEngine: e.currentTarget.value as AsrEngine })}>
             <option value="local">本机 SenseVoice（推荐）</option>
+            <option value="siliconflow">云端识别（硅基流动，免费，省内存）</option>
             <option value="groq">云端 Groq Whisper</option>
           </select>
         </Row>
@@ -132,7 +166,32 @@ function ModelsPage({ s, save }: { s: PublicSettings; save: Save }) {
             <option value="custom">自定义服务</option>
           </select>
         </Row>
+        <RefineNotes value={s.refineNotes} save={save} />
       </Section>
+      {(s.asrEngine === 'siliconflow' || s.hasSiliconflowKey) && (
+        <Section icon="mic" title="硅基流动">
+          <Row
+            title="API key"
+            description={
+              <>
+                注册即可免费使用语音识别，国内直连，不用代理。
+                <a class="link" onClick={() => void window.rea.openExternal(SILICONFLOW_KEYS_URL)}>
+                  去申请 key
+                </a>
+              </>
+            }
+            top
+          >
+            <KeyField
+              placeholder="sk-…  粘贴你的硅基流动 key"
+              source={s.siliconflowKeySource}
+              saved={s.hasSiliconflowKey}
+              test={(k) => window.rea.testSiliconflow(k)}
+              onSaved={(k) => save({ siliconflowKey: k })}
+            />
+          </Row>
+        </Section>
+      )}
       <Section icon="sparkle" title="Groq">
         <Row
           title="API key"
@@ -211,21 +270,60 @@ function ModelsPage({ s, save }: { s: PublicSettings; save: Save }) {
   )
 }
 
-function AboutPage() {
+const RELEASES_URL = 'https://github.com/PPory/saydra/releases/latest'
+
+export const hasUpdate = (u: UpdateState) => u.kind === 'ready' || u.kind === 'available'
+
+// Version line plus what the updater is doing, with the one button that moves it on.
+function UpdateRow({ version, update }: { version: string; update: UpdateState }) {
+  const status: Record<UpdateState['kind'], string> = {
+    idle: '',
+    checking: '正在检查更新…',
+    latest: '已是最新版本',
+    available: `新版本 ${'version' in update ? update.version : ''} 可以下载了`,
+    downloading: `正在下载新版本 ${'version' in update ? update.version : ''}（${update.kind === 'downloading' ? update.percent : 0}%）`,
+    ready: `新版本 ${'version' in update ? update.version : ''} 已就绪，重启即可更新`,
+    error: update.kind === 'error' ? update.message : ''
+  }
+  const text = status[update.kind]
+  const download = (label: string, variant: 'primary' | 'outline') => (
+    <Button variant={variant} onClick={() => void window.rea.openExternal(RELEASES_URL)}>
+      {label}
+    </Button>
+  )
+  return (
+    <Row title="版本" description={text ? `${version} · ${text}` : version}>
+      {update.kind === 'ready' && (
+        <Button variant="primary" onClick={() => void window.rea.updateInstall()}>
+          重启更新
+        </Button>
+      )}
+      {update.kind === 'available' && download('去下载', 'primary')}
+      {update.kind === 'error' && download('去下载页', 'outline')}
+      {['idle', 'latest', 'checking', 'error'].includes(update.kind) && (
+        <Button variant="outline" loading={update.kind === 'checking'} onClick={() => void window.rea.updateCheck()}>
+          {update.kind === 'error' ? '重试' : '检查更新'}
+        </Button>
+      )}
+    </Row>
+  )
+}
+
+function AboutPage({ update }: { update: UpdateState }) {
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => void window.rea.appInfo().then(setInfo), [])
   return (
     <div class="set-page">
       <h2 class="set-title">关于</h2>
       <Section icon="info" title="Saydra">
-        <Row title="版本" description={info?.version ?? ''} />
+        <UpdateRow version={info?.version ?? ''} update={update} />
         <Row
           title="怎么用"
           description="在任何输入框里按住快捷键说话，松开后整理好的文字自动出现在光标处；轻按一下进入免提，再按一下结束，Esc 取消。"
         />
         <Row
           title="隐私"
-          description="录音和历史只存在本机。识别默认在本机完成；润色把转写文字发给你配置的服务（Groq 或自定义服务）。"
+          description="录音和历史只存在本机。识别默认在本机完成；选了云端识别，或填了 Groq key（用来再听一遍英文）时，录音会发给对应的服务。润色把转写文字发给你配置的服务。检查更新只连接 GitHub。"
         />
         <Row title="数据位置" description={info?.dataDir ?? ''}>
           <Button variant="outline" onClick={() => void window.rea.openDataDir()}>
@@ -237,7 +335,17 @@ function AboutPage() {
   )
 }
 
-export function SettingsModal({ page, onPage, onClose }: { page: SettingsPage; onPage: (p: SettingsPage) => void; onClose: () => void }) {
+export function SettingsModal({
+  page,
+  update,
+  onPage,
+  onClose
+}: {
+  page: SettingsPage
+  update: UpdateState
+  onPage: (p: SettingsPage) => void
+  onClose: () => void
+}) {
   const [s, save] = useSettingsState()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.scrim .scrim') && onClose()
@@ -253,13 +361,14 @@ export function SettingsModal({ page, onPage, onClose }: { page: SettingsPage; o
             <button type="button" class={`nav-item${m.key === page ? ' on' : ''}`} onClick={() => onPage(m.key)}>
               <Icon name={m.icon} />
               <span>{m.label}</span>
+              {m.key === 'about' && hasUpdate(update) && <span class="nav-dot" aria-label="有新版本" />}
             </button>
           ))}
         </nav>
         <div class="settings-pane">
           {s && page === 'settings' && <GeneralPage s={s} save={save} />}
           {s && page === 'models' && <ModelsPage s={s} save={save} />}
-          {page === 'about' && <AboutPage />}
+          {page === 'about' && <AboutPage update={update} />}
         </div>
         <IconButton class="modal-close" icon="close" label="关闭" onClick={onClose} />
       </div>

@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HUB, type AskResult, type MacPermission } from '../shared/hub'
+import { HUB, type AskResult, type MacPermission, type UpdateState } from '../shared/hub'
 import { shortcutLabel, VK, type DictationMode } from '../shared/keys'
 import { findLanguage } from '../shared/languages'
 import {
@@ -40,6 +40,7 @@ import { getFocusContext } from './context'
 import { checkKey, LONG_TEXT_CHARS, transcribe } from './groq'
 import { createDictationKeyMachine, type DictationKeyHandlers } from './hotkey'
 import { notifyHub, registerHubIpc } from './hub'
+import { checkForUpdates, getUpdateState, installUpdate, startUpdater } from './updater'
 import { runHubShots } from './hub-shots'
 import { ApiError, chatWithFallback, listModels, setFetch } from './llm'
 import { copySelection, pasteText } from './paste'
@@ -70,6 +71,9 @@ import {
   getSaveRecordings,
   getShortcuts,
   getShowIdleBar,
+  getSiliconflowKey,
+  getAutoUpdate,
+  getRefineNotes,
   getTranslateTarget,
   isHiddenLaunch,
   saveSettings,
@@ -78,11 +82,14 @@ import {
 } from './settings'
 import { createShortcutCapture } from './shortcut-capture'
 import { applyReplacements } from './replace'
+import { checkSiliconflowKey, transcribeSiliconFlow } from './siliconflow'
+import { isFillerOnly, tidyRefined } from './text-tidy'
 import { dictionaryText, getDb, openStore, pruneHistory, saveBenchRecording, saveRecording } from './store'
 import {
   closeAnswerCard,
   createFloatingBar,
   getCard,
+  getHub,
   isCardVisible,
   openHub,
   placeBar,
@@ -124,6 +131,13 @@ if (LEARN_TEST) app.setPath('userData', join(tmpdir(), `saydra-learntest-${Date.
 // REA_HUB_SHOTS=<dir>: screenshot every hub page on sample data (see hub-shots.ts).
 const HUB_SHOTS = process.env.REA_HUB_SHOTS
 if (HUB_SHOTS) app.setPath('userData', join(tmpdir(), `saydra-hubshots-${Date.now()}`))
+
+// REA_UPDATE_URL=<url>: update from a local folder instead of GitHub (see updater.ts), on a
+// throwaway profile. With REA_UPDATE_SHOTS=<dir> it screenshots the hub's 关于 page and the
+// bar once the update is downloaded, then exits without installing.
+const UPDATE_TEST = process.env.REA_UPDATE_URL
+const UPDATE_SHOTS = process.env.REA_UPDATE_SHOTS
+if (UPDATE_TEST) app.setPath('userData', join(tmpdir(), `saydra-updatetest-${Date.now()}`))
 
 // REA_ALERT_SHOTS=<dir>: show each kind of alert card on the bar, screenshot, exit.
 const ALERT_SHOTS = process.env.REA_ALERT_SHOTS
@@ -229,10 +243,11 @@ function alertFor(err: unknown): Omit<BarAlert, 'id'> & { retry: boolean } {
 
 // Groq Whisper's take on the same audio, for refine to check English words against
 // (SenseVoice hears Chinese well and English badly, Whisper the other way round).
-// Only when the local transcript has English in it; never holds dictation up for long.
-async function whisperReference(job: Job): Promise<string | null> {
+// Started alongside recognition rather than after it, and only waited for when the
+// transcript has English in it; never holds dictation up for long.
+function whisperReference(job: Job): Promise<string | null> {
   const apiKey = getApiKey()
-  if (!apiKey) return null
+  if (!apiKey) return Promise.resolve(null)
   const heard = transcribe(apiKey, job.audio, { mimeType: job.mimeType, prompt: buildWhisperPrompt(dictionaryText()) })
     // Only there to settle English words: none in it, or a stock outro, and it is no use.
     .then((r) => (/[A-Za-z]/.test(r.text) && !isStockPhrase(r.rawText) ? r.text : null))
@@ -250,17 +265,51 @@ interface Recognized {
 // 词典 「常被识别成」: the user's fixed replacements.
 const applyHeardAs = (text: string): string => applyReplacements(text, getDb().replacements())
 
-// Local engine when chosen; Groq Whisper when the local one is unavailable.
+// The local model, loaded on demand when it is the fallback for 硅基流动.
+async function transcribeOnDevice(job: Job): Promise<string> {
+  const pcm = job.pcm ?? (await decodeInBar(job.audio))
+  if (!pcm) throw new Error('录音解码失败')
+  await preloadLocalAsr(modelsRoot())
+  return transcribeLocal(pcm)
+}
+
+// SenseVoice, on this machine or in 硅基流动's cloud, with Whisper as reference for
+// English; the local model when the cloud fails; Groq Whisper when neither works.
+let sfKeyWarned = false
+
 async function recognize(job: Job): Promise<Recognized> {
-  if (getAsrEngine() === 'local' && !localAsrFailed()) {
+  const engine = getAsrEngine()
+  const cloud = engine === 'siliconflow' && Boolean(getSiliconflowKey())
+  if (cloud || (engine === 'local' && !localAsrFailed())) {
+    const reference = whisperReference(job)
+    const finish = async (said: string, from: AsrEngine): Promise<Recognized> => {
+      const heard = /[A-Za-z]/.test(said) && !job.cancelled ? await reference : null
+      return { raw: applyHeardAs(fixEnglishCase(said, getDb().terms())), engine: from, heard }
+    }
     try {
-      if (!job.pcm) throw new Error('录音解码失败')
-      const said = await transcribeLocal(job.pcm)
-      const heard = /[A-Za-z]/.test(said) && !job.cancelled ? await whisperReference(job) : null
-      return { raw: applyHeardAs(fixEnglishCase(said, getDb().terms())), engine: 'local', heard }
+      if (cloud) return await finish(await transcribeSiliconFlow(getSiliconflowKey(), job.audio, job.mimeType), 'siliconflow')
+      return await finish(await transcribeOnDevice(job), 'local')
     } catch (err) {
+      if (cloud) {
+        console.warn('siliconflow recognition failed, using the local model', err)
+        // A bad key won't fix itself: say so once, otherwise every dictation quietly loads the local model.
+        if (err instanceof ApiError && err.kind === 'auth' && !sfKeyWarned) {
+          sfKeyWarned = true
+          showAlert({
+            id: 'sf-key',
+            title: '硅基流动的 key 用不了',
+            description: '这次先用本机识别了。请在设置里重新填写 key。',
+            actions: [{ label: '打开设置', action: 'open-settings', primary: true }]
+          })
+        }
+        try {
+          return await finish(await transcribeOnDevice(job), 'local')
+        } catch (localErr) {
+          console.warn('local recognition failed too', localErr)
+        }
+      }
       if (!getApiKey()) throw err
-      console.warn('local recognition failed, using Groq Whisper', err)
+      console.warn('recognition failed, using Groq Whisper', err)
     }
   }
   const apiKey = getApiKey()
@@ -303,9 +352,9 @@ function baseRow(job: Job, audioPath: string | null) {
 // 口述: clean the transcript up; any failure pastes the transcript itself.
 async function refineDictation(job: Job, { raw, engine, heard }: Recognized): Promise<Output> {
   const out: Output = { text: raw, prompt: raw, model: '', askResult: null, selectedText: null }
-  if (!needsRefine(raw, engine === 'groq')) return out
+  if (!needsRefine(raw, engine !== 'local')) return out
   try {
-    const system = buildRefineSystemPrompt(job.ctx, dictionaryText(), await job.inputBefore, heard)
+    const system = buildRefineSystemPrompt(job.ctx, dictionaryText(), await job.inputBefore, heard, getRefineNotes())
     const res = await chatWithFallback(refineTargets(raw.length), system, raw, {
       longText: raw.length > LONG_TEXT_CHARS
     })
@@ -314,7 +363,8 @@ async function refineDictation(job: Job, { raw, engine, heard }: Recognized): Pr
     // Cleanup trims fillers, never half the content; a much shorter result
     // means the model summarised, so keep the user's words instead.
     // Again on the result, in case the model put a misheard form back.
-    if (res.text && res.text.length >= raw.length * 0.5) out.text = applyHeardAs(res.text)
+    const text = tidyRefined(res.text, job.ctx?.scene ?? 'other')
+    if (text && text.length >= raw.length * 0.5) out.text = applyHeardAs(text)
   } catch (err) {
     console.warn('refine failed, pasting raw transcript', err) // degrade, never lose the words
   }
@@ -335,13 +385,13 @@ async function translate(job: Job, { raw, heard }: Recognized): Promise<Output> 
   return { text: res.text, prompt: raw, model: res.target.model, askResult: null, selectedText: null }
 }
 
-// 问任何问题: rewrite the selection in place, or answer on the card. The local
-// engine's transcript has no punctuation, so it is tidied for display meanwhile. With
+// 问任何问题: rewrite the selection in place, or answer on the card. SenseVoice's
+// transcript (no punctuation when local) is tidied for display meanwhile. With
 // English in it the tidy-up also fixes misheard words (「MC C P」), so the question waits for it.
 async function askAnything(job: Job, { raw, engine, heard }: Recognized): Promise<Output> {
   const selectedText = (await job.selection) ?? null
   const tidy =
-    engine === 'local' && needsRefine(raw, false)
+    engine !== 'groq' && needsRefine(raw, engine === 'siliconflow')
       ? chatWithFallback(refineTargets(raw.length), buildRefineSystemPrompt(null, dictionaryText(), null, heard), raw)
           .then((r) => r.text || raw)
           .catch(() => raw)
@@ -400,6 +450,13 @@ async function processRecording(job: Job): Promise<string | null> {
       if (job.fromHub) return '没有检测到语音'
       setView({ kind: 'idle' })
       showAlert({ title: '没有检测到语音', description: '请靠近麦克风再说一次。', autoHideMs: 3000 })
+      return null
+    }
+    // Only 「嗯」「呃」: nothing to type, so neither the model nor the paste is bothered.
+    if (job.mode === 'dictate' && isFillerOnly(raw, job.ctx?.scene ?? 'other')) {
+      if (job.fromHub) return '只听到了语气词'
+      setView({ kind: 'idle' })
+      showAlert({ title: '只听到了语气词', description: '这次没有输入任何内容。', autoHideMs: 3000 })
       return null
     }
     t = performance.now()
@@ -815,6 +872,8 @@ function onBarAction(action: BarActionName): void {
       return undoLearn()
     case 'copy-last':
       return void clipboard.writeText(missedText)
+    case 'install-update':
+      return installUpdate()
     case 'open-permissions':
       return openHub(setupProblem() ? 'welcome' : 'permissions')
   }
@@ -908,6 +967,14 @@ function wireIpc(): void {
       return { ok: false, message: err instanceof ApiError ? err.message : String(err) }
     }
   })
+  ipcMain.handle(IPC.testSiliconflow, async (_e, apiKey?: string) => {
+    try {
+      await checkSiliconflowKey(apiKey?.trim() || getSiliconflowKey())
+      return { ok: true, message: '连接成功，可以开始使用了' }
+    } catch (err) {
+      return { ok: false, message: err instanceof ApiError ? err.message : String(err) }
+    }
+  })
   ipcMain.handle(IPC.testCustom, async (_e, baseUrl: string, apiKey?: string) => {
     const ep = customEndpoint(baseUrl.trim() || undefined, apiKey?.trim() || undefined)
     if (!ep) return { ok: false, message: '请填写服务地址和 API key' }
@@ -924,7 +991,7 @@ function wireIpc(): void {
     if (!target) return { ok: false, message: provider === 'custom' ? '先填好服务地址、API key 和模型' : '先填好 Groq API key' }
     const t0 = performance.now()
     try {
-      const res = await chatWithFallback([target], buildRefineSystemPrompt(null, ''), TRY_REFINE_SAMPLE, { timeoutMs: 30_000 })
+      const res = await chatWithFallback([target], buildRefineSystemPrompt(null, '', null, null, getRefineNotes()), TRY_REFINE_SAMPLE, { timeoutMs: 30_000 })
       return { ok: true, message: `${target.model} · ${((performance.now() - t0) / 1000).toFixed(1)} 秒`, output: res.text }
     } catch (err) {
       if (!(err instanceof ApiError)) throw err
@@ -939,6 +1006,9 @@ function wireIpc(): void {
     if (/^https:\/\//.test(url)) return shell.openExternal(url)
   })
   registerHubIpc({ retry: retryFromHistory, capture })
+  ipcMain.handle(HUB.updateState, () => getUpdateState())
+  ipcMain.handle(HUB.updateCheck, () => checkForUpdates())
+  ipcMain.handle(HUB.updateInstall, () => installUpdate())
   ipcMain.handle(HUB.permissions, () => (isMac ? macPermissions(usesFn(), Boolean(stopKeyHook)) : null))
   ipcMain.handle(HUB.grantPermission, (_e, kind: MacPermission) => isMac && grantMacPermission(kind))
   ipcMain.handle(HUB.relaunch, () => {
@@ -1033,7 +1103,33 @@ function setUpMacApp(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }]))
 }
 
+// The bar says so once per run when an update is ready; the hub and the tray always show it.
+let updateAnnounced = ''
+function onUpdateState(s: UpdateState): void {
+  getHub()?.webContents.send(HUB.updateChanged, s)
+  refreshTray()
+  if (s.kind !== 'ready' || updateAnnounced === s.version) return
+  updateAnnounced = s.version
+  showAlert({
+    id: 'update',
+    title: `Saydra ${s.version} 已准备好`,
+    description: '重启一下就能用上新版本，设置和历史都会保留。',
+    actions: [{ label: '重启更新', action: 'install-update', primary: true }]
+  })
+  if (UPDATE_SHOTS) void shootUpdate(UPDATE_SHOTS)
+}
+
+async function shootUpdate(dir: string): Promise<void> {
+  openHub('about')
+  await new Promise((r) => setTimeout(r, 2000))
+  const hub = getHub()
+  if (hub) await writeFile(join(dir, 'update-about.png'), (await hub.webContents.capturePage()).toPNG())
+  await writeFile(join(dir, 'update-bar.png'), (await bar.webContents.capturePage()).toPNG())
+  app.exit(0)
+}
+
 function refreshTray(): void {
+  const update = getUpdateState()
   const key = shortcutLabel(getShortcuts().dictate)
   tray.setToolTip(`Saydra：按一下 ${key} 开始说话，再按一下结束`)
   tray.setContextMenu(
@@ -1043,7 +1139,9 @@ function refreshTray(): void {
       { label: '将词汇添加到词典', click: () => openHub('dictionary') },
       { type: 'separator' },
       { label: '设置...', click: () => openHub('settings') },
-      { label: `版本 ${app.getVersion()}`, enabled: false },
+      update.kind === 'ready'
+        ? { label: `重启以更新到 ${update.version}`, click: () => installUpdate() }
+        : { label: `版本 ${app.getVersion()}`, enabled: false },
       { type: 'separator' },
       { label: '退出 Saydra', role: 'quit' }
     ])
@@ -1164,6 +1262,7 @@ app.whenReady().then(() => {
   if (HUB_SHOTS) return void runHubShots(getDb(), HUB_SHOTS).catch((err) => (console.error(err), app.exit(1)))
   if (LEARN_TEST) return void runLearnTest().catch((err) => (console.error(err), app.exit(1)))
   if (ALERT_SHOTS) return void runAlertShots(ALERT_SHOTS).catch((err) => (console.error(err), app.exit(1)))
+  if (!SELFTEST_WAV) startUpdater({ enabled: getAutoUpdate, onChange: onUpdateState })
 
   if (SELFTEST_WAV) {
     const seconds = Number(process.env.REA_SELFTEST_SECONDS) || 6

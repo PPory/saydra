@@ -32,6 +32,8 @@ win:
     - from: src/main/helpers/win-helper.ps1
       to: win-helper.ps1
 nsis:
+  # No spaces: GitHub turns them into dots on upload and latest.yml would point nowhere
+  artifactName: Saydra-Setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
@@ -60,3 +62,8 @@ mac:
       to: mac-helper
 dmg:
   title: Saydra
+# In-app updates read latest.yml from the public repo's releases (see src/main/updater.ts)
+publish:
+  provider: github
+  owner: PPory
+  repo: saydra

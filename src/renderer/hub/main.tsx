@@ -3,13 +3,13 @@
 import '@fontsource/prompt/500.css'
 import { render } from 'preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
-import type { HubChange, HubPage, HubRoute } from '../../shared/hub'
+import type { HubChange, HubPage, HubRoute, UpdateState } from '../../shared/hub'
 import { IS_MAC } from '../../shared/keys'
 import { Dictionary } from './pages/Dictionary'
 import { History } from './pages/History'
 import { Home } from './pages/Home'
 import { PermissionsModal } from './Permissions'
-import { SettingsModal, type SettingsPage } from './settings/SettingsModal'
+import { hasUpdate, SettingsModal, type SettingsPage } from './settings/SettingsModal'
 import { Welcome } from './Welcome'
 import { Icon, Logo, ToastProvider, type IconName } from './ui'
 import './tokens.css'
@@ -41,6 +41,12 @@ function App() {
   const [permissions, setPermissions] = useState(false)
   // Bumped when main reports a change, so pages refetch.
   const [versions, setVersions] = useState<Record<HubChange, number>>({ history: 0, dictionary: 0, settings: 0 })
+
+  const [update, setUpdate] = useState<UpdateState>({ kind: 'idle' })
+  useEffect(() => {
+    void window.rea.updateState().then(setUpdate)
+    window.rea.onUpdateChanged(setUpdate)
+  }, [])
 
   const go = useCallback((p: HubPage) => {
     setPage(p)
@@ -105,6 +111,7 @@ function App() {
             <button type="button" class="nav-item" onClick={() => setSettings('about')}>
               <Icon name="help" />
               <span>关于</span>
+              {hasUpdate(update) && <span class="nav-dot" aria-label="有新版本" />}
             </button>
           </div>
         </div>
@@ -114,7 +121,7 @@ function App() {
         {page === 'history' && <History version={versions.history + versions.settings} />}
         {page === 'dictionary' && <Dictionary version={versions.dictionary} />}
       </main>
-      {settings && <SettingsModal page={settings} onPage={setSettings} onClose={closeSettings} />}
+      {settings && <SettingsModal page={settings} update={update} onPage={setSettings} onClose={closeSettings} />}
       {welcome && <Welcome onClose={closeWelcome} />}
       {permissions && !welcome && <PermissionsModal onClose={() => setPermissions(false)} />}
     </div>

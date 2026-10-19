@@ -84,6 +84,16 @@ export interface AppInfo {
   dataDir: string
 }
 
+// In-app update. 'available' is macOS only: there is a new release but it can't be installed in place.
+export type UpdateState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'latest' }
+  | { kind: 'available'; version: string }
+  | { kind: 'downloading'; version: string; percent: number }
+  | { kind: 'ready'; version: string }
+  | { kind: 'error'; message: string }
+
 export const HUB = {
   stats: 'hub:stats',
   historyList: 'hub:history-list',
@@ -104,9 +114,13 @@ export const HUB = {
   permissions: 'hub:permissions', // macOS; null elsewhere
   grantPermission: 'hub:grant-permission',
   relaunch: 'hub:relaunch',
+  updateState: 'hub:update-state',
+  updateCheck: 'hub:update-check',
+  updateInstall: 'hub:update-install',
   // main -> hub
   changed: 'hub:changed',
-  navigate: 'hub:navigate'
+  navigate: 'hub:navigate',
+  updateChanged: 'hub:update-changed'
 } as const
 
 export type HubChange = 'history' | 'dictionary' | 'settings'

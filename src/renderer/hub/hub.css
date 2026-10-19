@@ -113,6 +113,13 @@ button {
   background: var(--fill-none-selected);
   color: var(--text-1);
 }
+.nav-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--error);
+}
 .sidebar-bottom {
   margin-top: auto;
   display: flex;
@@ -1544,6 +1551,13 @@ input[type='checkbox'] {
 .welcome-keys .keycaps {
   vertical-align: middle;
   margin: 0 2px;
+}
+.refine-notes {
+  min-height: 110px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+  line-height: 22px;
 }
 .welcome-try {
   min-height: 96px;

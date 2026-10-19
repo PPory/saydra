@@ -29,5 +29,7 @@ export const win: Platform = {
     const w = await activeWindow()
     if (!w) return null
     return { appName: basename(w.owner.path || w.owner.name || ''), title: w.title }
-  }
+  },
+  // Win+V history, cloud clipboard and tools like Ditto all honour these.
+  transientFormats: ['ExcludeClipboardContentFromMonitorProcessing', 'CanIncludeInClipboardHistory', 'CanUploadToCloudClipboard']
 }

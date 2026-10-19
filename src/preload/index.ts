@@ -26,7 +26,8 @@ import {
   type HubRoute,
   type MacPermission,
   type MacPermissions,
-  type ShortcutTarget
+  type ShortcutTarget,
+  type UpdateState
 } from '../shared/hub'
 
 type Result = { ok: boolean; message: string }
@@ -65,6 +66,7 @@ const api = {
   testConnection: (apiKey?: string): Promise<TestResult> => ipcRenderer.invoke(IPC.testConnection, apiKey),
   testCustom: (baseUrl: string, apiKey?: string): Promise<TestResult> =>
     ipcRenderer.invoke(IPC.testCustom, baseUrl, apiKey),
+  testSiliconflow: (apiKey?: string): Promise<TestResult> => ipcRenderer.invoke(IPC.testSiliconflow, apiKey),
   tryRefine: (provider: RefineProvider): Promise<TryRefineResult> => ipcRenderer.invoke(IPC.tryRefine, provider),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
   // hub
@@ -91,7 +93,11 @@ const api = {
   cancelCapture: (): Promise<void> => ipcRenderer.invoke(HUB.cancelCapture),
   permissions: (): Promise<MacPermissions | null> => ipcRenderer.invoke(HUB.permissions),
   grantPermission: (kind: MacPermission): Promise<void> => ipcRenderer.invoke(HUB.grantPermission, kind),
-  relaunch: (): Promise<void> => ipcRenderer.invoke(HUB.relaunch)
+  relaunch: (): Promise<void> => ipcRenderer.invoke(HUB.relaunch),
+  updateState: (): Promise<UpdateState> => ipcRenderer.invoke(HUB.updateState),
+  updateCheck: (): Promise<void> => ipcRenderer.invoke(HUB.updateCheck),
+  updateInstall: (): Promise<void> => ipcRenderer.invoke(HUB.updateInstall),
+  onUpdateChanged: (cb: (s: UpdateState) => void) => on(HUB.updateChanged, cb),
 }
 
 export type ReaApi = typeof api
