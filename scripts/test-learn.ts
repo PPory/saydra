@@ -1,7 +1,7 @@
 // Dictionary auto-learn: finding the user's corrections in pasted text, and
 // accepting only grounded words from the model.
 // Usage: npm run test:learn
-import { findEdits, groundTerms, heardForms } from '../src/main/learn'
+import { findEdits, groundTerms, heardForms, holdsPasted } from '../src/main/learn'
 
 const cases: [string, boolean, unknown?][] = []
 const check = (name: string, ok: boolean, detail?: unknown) => cases.push([name, ok, detail])
@@ -27,6 +27,14 @@ check('single character fix', e.length === 1 && e[0].added === '辛', e)
 
 e = findEdits(pasted, before, `${before}另外补一句很长的话，跟拼写没有关系。`)
 check('appended text is not an edit', e.length === 0, e)
+
+// Editors read paragraphs back with their own line breaks.
+const paras = '第一段讲新和的安排。\n\n第二段说 cloud code。'
+const box = '第一段讲新和的安排。\r\n第二段说 cloud code。\u200B'
+check('box with other line breaks holds the paste', holdsPasted(box, paras))
+check('box without the paste', !holdsPasted('别的内容', paras) && !holdsPasted(box, '  '))
+e = findEdits(paras, box, box.replace('新和', '辛禾'))
+check('fix found across changed line breaks', e.length === 1 && e[0].added === '辛禾', e)
 
 e = findEdits(pasted, before, before.replace('这周四和 cloud code 团队开会。', ''))
 check('deletion is not an edit', e.length === 0, e)

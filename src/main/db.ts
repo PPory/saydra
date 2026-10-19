@@ -354,6 +354,17 @@ export function openDb(file: string) {
       return true
     },
 
+    // Undo of addHeardAs.
+    removeHeardAs(term: string, form: string): boolean {
+      const row = db.prepare('select * from dictionary where term = ?').get(term) as Row | undefined
+      if (!row) return false
+      const before = forms(row)
+      const list = before.filter((f) => f !== form)
+      if (list.length === before.length) return false
+      db.prepare('update dictionary set heard_as = ? where id = ?').run(storeForms(list), row.id)
+      return true
+    },
+
     // Every 常被识别成 form with its word, oldest word first.
     replacements(): Replacement[] {
       const rows = db.prepare('select term, heard_as from dictionary where heard_as is not null order by created_at').all() as Row[]

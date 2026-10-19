@@ -15,6 +15,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HUB, type AskResult, type MacPermission, type UpdateState } from '../shared/hub'
@@ -35,7 +36,7 @@ import {
   type VoiceStats
 } from '../shared/types'
 import { localAsrFailed, preloadLocalAsr, transcribeLocal } from './asr'
-import { finishTracking, learnFrom, trackPaste } from './auto-learn'
+import { finishTracking, initAutoLearn, learnFrom, noteKey, trackPaste, type Learned } from './auto-learn'
 import { getFocusContext } from './context'
 import { checkKey, LONG_TEXT_CHARS, transcribe } from './groq'
 import { createDictationKeyMachine, type DictationKeyHandlers } from './hotkey'
@@ -128,6 +129,7 @@ if (SELFTEST_WAV) {
 }
 
 // REA_SELFTEST_LEARN=1: run auto-learn on a sample correction, print what it learned, exit.
+// REA_SELFTEST_LEARN=track: the same through a real input box (Windows, from source), see runTrackTest.
 const LEARN_TEST = process.env.REA_SELFTEST_LEARN
 if (LEARN_TEST) app.setPath('userData', join(tmpdir(), `saydra-learntest-${Date.now()}`))
 
@@ -180,7 +182,7 @@ let selection: Promise<string | null> | null = null
 let inputBefore: Promise<string | null> | null = null
 let recordingSeq = 0
 let mutedByUs = false
-let lastLearned: string[] = []
+let lastLearned: Learned = { words: [], heard: [] }
 
 interface Job {
   id: string // history row id; a retry reuses it
@@ -480,7 +482,7 @@ async function processRecording(job: Job): Promise<string | null> {
         const landed = await pasteText(out.text, () => checkPaste(beforePaste, out.text))
         setView({ kind: 'done' })
         if (landed === false) pasteMissedAlert(out.text)
-        else trackPaste(out.text, onLearned)
+        else void trackPaste(out.text)
       }
     }
     pending = null
@@ -696,13 +698,17 @@ function noLanguageAlert(): void {
   })
 }
 
-// 「"辛禾" 已添加到您的词典」, with 撤销.
-function onLearned(words: string[]): void {
-  lastLearned = words
+// 「"辛禾" 已添加到您的词典」, with 撤销. A word already in the dictionary that only
+// learned a new 常被识别成 says so too, or the fix would seem to have gone unnoticed.
+function onLearned(r: Learned): void {
+  lastLearned = r
   notifyHub('dictionary')
+  const forms = r.heard.filter((h) => !r.words.includes(h.term))
   showAlert({
     id: 'learned',
-    title: `"${words.join('、')}" 已添加到您的词典`,
+    title: r.words.length
+      ? `"${r.words.join('、')}" 已添加到您的词典`
+      : `以后 ${forms.map((h) => `"${h.form}"`).join('、')} 会自动写成 ${[...new Set(forms.map((h) => `"${h.term}"`))].join('、')}`,
     actions: [{ label: '撤销', action: 'undo-learn' }],
     autoHideMs: 6000
   })
@@ -710,8 +716,10 @@ function onLearned(words: string[]): void {
 
 function undoLearn(): void {
   const db = getDb()
-  db.deleteWords(db.listWords('', 'auto').filter((w) => lastLearned.includes(w.term)).map((w) => w.id))
-  lastLearned = []
+  const { words, heard } = lastLearned
+  db.deleteWords(db.listWords('', 'auto').filter((w) => words.includes(w.term)).map((w) => w.id))
+  for (const h of heard) if (!words.includes(h.term)) db.removeHeardAs(h.term, h.form)
+  lastLearned = { words: [], heard: [] }
   notifyHub('dictionary')
 }
 
@@ -779,7 +787,7 @@ const keyHandlers: DictationKeyHandlers = {
       noLanguageAlert()
       return refuseStart()
     }
-    finishTracking(onLearned)
+    void finishTracking()
     mode = m
     handsFree = false
     selection = null
@@ -1031,6 +1039,7 @@ let stopKeyHook: (() => void) | null = null
 let escClosedCard = false
 
 function onKey(vk: number, down: boolean): boolean {
+  if (down) noteKey() // auto-learn reads the box it watches again
   // While the settings page records a shortcut, keys go to it instead of dictation.
   if (capture.active) return capture.key(vk, down)
   // Esc closes the answer card (and only that: the app underneath never sees it).
@@ -1217,11 +1226,14 @@ async function runAlertShots(dir: string): Promise<void> {
   await wait(600)
   const open = await bar.webContents.executeJavaScript(`document.querySelectorAll('.alert').length`)
   console.log(`  copy-last: clipboard ${(await clipboard.readText()) === said ? 'has the text' : 'WRONG'}, cards open after click ${open}`)
-  onLearned([process.env.REA_ALERT_LEARNED_WORD || 'GPT']) // the word is settable for promo shots
+  onLearned({ words: [process.env.REA_ALERT_LEARNED_WORD || 'GPT'], heard: [] }) // the word is settable for promo shots
   await wait(500)
   await shoot('alert-learned')
   await wait(3000)
   await shoot('alert-learned-later')
+  onLearned({ words: [], heard: [{ term: 'git', form: 'get' }] }) // a word already in the dictionary learns a form
+  await wait(500)
+  await shoot('alert-learned-heard')
   noLanguageAlert()
   await wait(500)
   await shoot('alert-two')
@@ -1246,7 +1258,7 @@ async function runLearnTest(): Promise<void> {
   const baseline = `会议记录：${pasted}`
   const current = baseline.replace('新和', '辛禾').replace('cloud code', 'Claude Code').replace('开会', '碰个头')
   let t = performance.now()
-  const words = await learnFrom(pasted, baseline, current)
+  const { words, heard } = await learnFrom(pasted, baseline, current)
   const learnMs = performance.now() - t
   t = performance.now()
   const info = await focusInfo(40)
@@ -1258,11 +1270,45 @@ async function runLearnTest(): Promise<void> {
     forms.some((r) => r.from === '新和' && r.to === '辛禾') &&
     forms.some((r) => r.from === 'cloud code' && r.to === 'Claude Code')
   console.log(`LEARN TEST ${ok ? 'OK' : 'FAIL'}
-  learned: ${JSON.stringify(words)} in ${Math.round(learnMs)}ms
+  learned: ${JSON.stringify(words)}, heard ${heard.map((h) => `${h.form}→${h.term}`).join('、') || 'none'} in ${Math.round(learnMs)}ms
   dictionary auto: ${JSON.stringify(getDb().listWords('', 'auto').map((w) => w.term))}
   常被识别成: ${forms.map((r) => `${r.from}→${r.to}`).join('、') || 'none'}
   helper: ${info ? `focus ${info.type} pid ${info.pid}, before ${JSON.stringify(info.before?.slice(-20) ?? null)}` : 'no readable focus'} (${Math.round(performance.now() - t)}ms)
   speakers muted: ${await isMuted()}`)
+  app.exit(ok ? 0 : 1)
+}
+
+// Auto-learn on a real box: scripts/track-test-form.ps1 shows the pasted text in a
+// window of its own, fixes a word, then clears the box like sending a chat message
+// (case 1) or just leaves the fix there (case 2, judged after the pause).
+async function runTrackTest(): Promise<void> {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const learned: Learned[] = []
+  const logged: string[] = []
+  initAutoLearn({ onLearned: (r) => learned.push(r), log: (line) => logged.push(line) })
+  const form = join(app.getAppPath(), 'scripts', 'track-test-form.ps1')
+  const run = async (pasted: string, from: string, to: string, clearAfterMs: number) => {
+    learned.length = logged.length = 0
+    const text = `会议记录：${pasted}`
+    const args = ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', form, '-Text', text, '-Fixed', text.replace(from, to)]
+    const ps = spawn('powershell.exe', [...args, '-ClearAfterMs', String(clearAfterMs), '-CloseAfterMs', '16000'])
+    const steps: string[] = []
+    ps.stdout.on('data', (d: Buffer) => steps.push(...d.toString().trim().split(/\s+/)))
+    // Windows may keep another window in front at first; the form keeps asking.
+    for (let i = 0; i < 50 && !(await focusInfo())?.text?.includes(pasted); i++) await wait(100)
+    const t = performance.now()
+    void trackPaste(pasted)
+    for (let i = 0; i < 200 && !logged.some((l) => l.includes(' end=') || l.includes(' skip=')); i++) await wait(100)
+    ps.kill()
+    const words = learned.flatMap((r) => r.words)
+    return { ok: words.includes(to), words, steps, log: logged.join(' | '), ms: Math.round(performance.now() - t) }
+  }
+  const sent = await run('我叫新和，这周四和团队开会。', '新和', '辛禾', 5500)
+  const idle = await run('明天和 cloud code 团队对一下进度。', 'cloud code', 'Claude Code', 0)
+  const ok = sent.ok && sent.log.includes('end=sent learned') && idle.ok
+  console.log(`TRACK TEST ${ok ? 'OK' : 'FAIL'}
+  fixed then cleared: ${JSON.stringify(sent.words)} [${sent.steps.join(' ')}] ${sent.log}
+  fixed and left:     ${JSON.stringify(idle.words)} [${idle.steps.join(' ')}] ${idle.log}`)
   app.exit(ok ? 0 : 1)
 }
 
@@ -1295,9 +1341,10 @@ app.whenReady().then(() => {
   wireIpc()
   createTray()
   if (HUB_SHOTS) return void runHubShots(getDb(), HUB_SHOTS).catch((err) => (console.error(err), app.exit(1)))
-  if (LEARN_TEST) return void runLearnTest().catch((err) => (console.error(err), app.exit(1)))
+  if (LEARN_TEST) return void (LEARN_TEST === 'track' ? runTrackTest() : runLearnTest()).catch((err) => (console.error(err), app.exit(1)))
   if (ALERT_SHOTS) return void runAlertShots(ALERT_SHOTS).catch((err) => (console.error(err), app.exit(1)))
   if (!SELFTEST_WAV) announceUpdated()
+  initAutoLearn({ onLearned, log: (line) => appendLog('learn.log', line) })
   if (!SELFTEST_WAV) startUpdater({ enabled: getAutoUpdate, onChange: onUpdateState, log: (line) => appendLog('update.log', line) })
 
   if (SELFTEST_WAV) {

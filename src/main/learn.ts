@@ -108,7 +108,19 @@ function mapOffset(hunks: Hunk[], at: number): number {
 const MAX_EDIT_CHARS = 30
 const CONTEXT_CHARS = 30
 const onlyPunctuation = (s: string) => !/[\p{L}\p{N}]/u.test(s)
-const normalize = (s: string) => s.replace(/\r\n?/g, '\n')
+// Editors read back what was pasted with their own line breaks: \r\n, blank lines
+// between paragraphs dropped, zero-width marks around rich text.
+const normalize = (s: string) =>
+  s
+    .replace(/\r\n?/g, '\n')
+    .replace(/[​-‏﻿]/g, '')
+    .replace(/[ \t]*\n[\s]*/g, '\n')
+
+// The box holds what we pasted (line breaks aside), so tracking it makes sense.
+export const holdsPasted = (box: string, pasted: string): boolean => {
+  const p = normalize(pasted).trim()
+  return p !== '' && normalize(box).includes(p)
+}
 
 // What the user corrected inside the pasted text: `baseline` is the input box
 // right after pasting, `current` the same box later. Only word-sized
