@@ -122,9 +122,9 @@ function RefineNotes({ value, save }: { value: string; save: Save }) {
   const [text, setText] = useState(value)
   useEffect(() => setText(value), [value])
   return (
-    <Row title="我的整理要求" description="写给 AI 的补充要求，口述整理时会照做。和默认的排版风格冲突时，以这里为准。下面「试一下」可以看效果。" top>
+    <Row title="我的整理要求" description="整理口述时会照做，和默认风格冲突时以这里为准。" stacked>
       <textarea
-        class="field wide refine-notes"
+        class="field refine-notes"
         maxLength={500}
         value={text}
         placeholder={'比如：\n英文术语不要翻译，保持原样\n结尾不要加句号\n「咱们」都写成「我们」'}

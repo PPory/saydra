@@ -1262,7 +1262,7 @@ app.whenReady().then(() => {
   if (HUB_SHOTS) return void runHubShots(getDb(), HUB_SHOTS).catch((err) => (console.error(err), app.exit(1)))
   if (LEARN_TEST) return void runLearnTest().catch((err) => (console.error(err), app.exit(1)))
   if (ALERT_SHOTS) return void runAlertShots(ALERT_SHOTS).catch((err) => (console.error(err), app.exit(1)))
-  if (!SELFTEST_WAV) startUpdater({ enabled: getAutoUpdate, onChange: onUpdateState })
+  if (!SELFTEST_WAV) startUpdater({ enabled: getAutoUpdate, onChange: onUpdateState, log: (line) => appendLog('update.log', line) })
 
   if (SELFTEST_WAV) {
     const seconds = Number(process.env.REA_SELFTEST_SECONDS) || 6

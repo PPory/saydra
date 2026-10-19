@@ -1210,6 +1210,14 @@ input[type='checkbox'] {
 .set-row.top {
   align-items: flex-start;
 }
+.set-row.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.set-row.stacked .set-row-control > * {
+  flex: 1;
+}
 .set-row-text {
   flex: 1;
   min-width: 0;

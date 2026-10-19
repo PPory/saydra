@@ -10,11 +10,13 @@ const { autoUpdater } = electronUpdater
 export const RELEASES_URL = 'https://github.com/PPory/saydra/releases/latest'
 const FIRST_CHECK_MS = 10_000
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000
+const RETRY_AFTER_ERROR_MS = 30 * 60 * 1000
 const canInstall = process.platform === 'win32'
 
 let state: UpdateState = { kind: 'idle' }
 let started = false
 let onChange: (s: UpdateState) => void = () => {}
+let retryTimer: ReturnType<typeof setTimeout> | undefined
 
 function set(next: UpdateState): void {
   if (process.env.REA_UPDATE_URL) console.log('update:', JSON.stringify(next))
@@ -25,7 +27,11 @@ function set(next: UpdateState): void {
 export const getUpdateState = (): UpdateState => state
 
 // REA_UPDATE_URL points a packaged build at a local folder holding latest.yml, for testing.
-export function startUpdater(opts: { enabled: () => boolean; onChange: (s: UpdateState) => void }): void {
+export function startUpdater(opts: {
+  enabled: () => boolean
+  onChange: (s: UpdateState) => void
+  log: (line: string) => void
+}): void {
   const testUrl = process.env.REA_UPDATE_URL
   if (!app.isPackaged && !testUrl) return
   started = true
@@ -46,17 +52,25 @@ export function startUpdater(opts: { enabled: () => boolean; onChange: (s: Updat
   })
   autoUpdater.on('update-downloaded', (info) => set({ kind: 'ready', version: info.version }))
   autoUpdater.on('error', (err) => {
-    console.warn('update failed', err)
-    // GitHub is often unreachable without a proxy here; say so and offer the download page.
-    set({
-      kind: 'error',
-      message: state.kind === 'downloading' ? '自动下载失败，可能是网络连不上 GitHub' : '检查更新失败，可能是网络连不上 GitHub'
-    })
+    opts.log(`${state.kind}: ${String(err?.message ?? err).split('\n')[0].slice(0, 300)}`)
+    set({ kind: 'error', message: errorMessage(err, state.kind === 'downloading') })
+    // Often a passing network hiccup, or a release still being uploaded: try again soon.
+    clearTimeout(retryTimer)
+    retryTimer = setTimeout(scheduled, RETRY_AFTER_ERROR_MS)
   })
 
   const scheduled = () => opts.enabled() && void checkForUpdates()
   setTimeout(scheduled, FIRST_CHECK_MS)
   setInterval(scheduled, CHECK_EVERY_MS)
+}
+
+// Only a failed connection is a network problem; a 404 or a release without
+// latest.yml (still uploading, or published by hand) is not the user's to fix.
+function errorMessage(err: unknown, downloading: boolean): string {
+  const text = String((err as Error)?.message ?? err)
+  if (/net::ERR_|ETIMEDOUT|ECONNRESET|ENOTFOUND|socket hang up/i.test(text))
+    return downloading ? '下载中断了，网络连不上 GitHub，稍后会自动再试' : '连不上 GitHub，检查网络或代理后点「重试」'
+  return downloading ? '下载没有完成，稍后会自动再试' : '暂时查不到新版本信息，稍后会自动再查'
 }
 
 export async function checkForUpdates(): Promise<void> {

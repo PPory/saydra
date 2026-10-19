@@ -22,15 +22,17 @@ export function Row({
   title,
   description,
   children,
-  top
+  top,
+  stacked
 }: {
   title: string
   description?: ComponentChildren
   children?: ComponentChildren
   top?: boolean
+  stacked?: boolean // control below the text, full width
 }) {
   return (
-    <div class={`set-row${top ? ' top' : ''}`}>
+    <div class={`set-row${top ? ' top' : ''}${stacked ? ' stacked' : ''}`}>
       <div class="set-row-text">
         <span class="set-row-title">{title}</span>
         {description && <span class="set-row-desc">{description}</span>}
