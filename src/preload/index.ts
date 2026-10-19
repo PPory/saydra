@@ -98,6 +98,7 @@ const api = {
   updateState: (): Promise<UpdateState> => ipcRenderer.invoke(HUB.updateState),
   updateCheck: (): Promise<void> => ipcRenderer.invoke(HUB.updateCheck),
   updateInstall: (): Promise<void> => ipcRenderer.invoke(HUB.updateInstall),
+  dimTitleBar: (dim: boolean) => ipcRenderer.send(HUB.dimTitleBar, dim),
   onUpdateChanged: (cb: (s: UpdateState) => void) => on(HUB.updateChanged, cb),
 }
 

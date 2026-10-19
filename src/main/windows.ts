@@ -190,6 +190,30 @@ const HUB_COLORS = {
 }
 const hubColors = () => HUB_COLORS[nativeTheme.shouldUseDarkColors ? 'dark' : 'light']
 
+// The page's --scrim (rgba 17 17 17 / 0.45) can't cover the buttons Windows draws,
+// so while a modal is up they get the colours they would have under it.
+const SCRIM = { rgb: 17, alpha: 0.45 }
+const underScrim = (hex: string) =>
+  '#' +
+  [1, 3, 5]
+    .map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - SCRIM.alpha) + SCRIM.rgb * SCRIM.alpha))
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')
+let hubDimmed = false
+
+function paintTitleBar(win: BrowserWindow): void {
+  if (isMac) return
+  const c = hubColors()
+  const dim = (hex: string) => (hubDimmed ? underScrim(hex) : hex)
+  win.setTitleBarOverlay({ color: dim(c.bg), symbolColor: dim(c.symbol), height: 40 })
+}
+
+export function dimHubTitleBar(dim: boolean): void {
+  hubDimmed = dim
+  const win = getHub()
+  if (win) paintTitleBar(win)
+}
+
 export const getHub = (): BrowserWindow | null => (hubWin && !hubWin.isDestroyed() ? hubWin : null)
 
 // The main window (首页 / 历史记录 / 词典 + settings). Optional route jumps to a page.
@@ -222,7 +246,7 @@ export function openHub(route?: HubRoute): void {
     if (isMac) app.focus({ steal: true })
     win.show()
   })
-  win.on('closed', () => (hubWin = null))
+  win.on('closed', () => ((hubWin = null), (hubDimmed = false)))
   if (route) win.webContents.once('did-finish-load', () => win.webContents.send(HUB.navigate, route))
   load(win, 'hub')
 }
@@ -232,5 +256,5 @@ nativeTheme.on('updated', () => {
   if (!win) return
   const c = hubColors()
   win.setBackgroundColor(c.bg)
-  if (!isMac) win.setTitleBarOverlay({ color: c.bg, symbolColor: c.symbol, height: 40 })
+  paintTitleBar(win)
 })

@@ -88,6 +88,7 @@ declare global {
       updateState(): Promise<UpdateState>
       updateCheck(): Promise<void>
       updateInstall(): Promise<void>
+      dimTitleBar(dim: boolean): void
       onUpdateChanged(cb: (s: UpdateState) => void): void
     }
   }

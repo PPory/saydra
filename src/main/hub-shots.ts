@@ -1,6 +1,6 @@
 // Dev check: REA_HUB_SHOTS=<dir> opens the hub on a throwaway profile filled
 // with sample data and saves a screenshot of every page in light and dark.
-import { app, nativeTheme } from 'electron'
+import { app, desktopCapturer, nativeTheme, type BrowserWindow } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { HubRoute } from '../shared/hub'
@@ -121,6 +121,10 @@ export async function runHubShots(db: Db, dir: string): Promise<void> {
         await shootChoice(0, 'groq')
         await shootChoice(1, 'custom')
       }
+      if (route === 'settings' && process.platform === 'win32') {
+        // The whole window, with the buttons Windows draws: dimmed like the page under the modal.
+        await writeFile(join(dir, `${theme}-settings-window.png`), await shootWindow(win))
+      }
       if (route === 'settings' || route === 'models') {
         // These pages are taller than the modal: also shoot their bottom half.
         await win.webContents.executeJavaScript(`(() => {
@@ -136,4 +140,13 @@ export async function runHubShots(db: Db, dir: string): Promise<void> {
   }
   console.log('HUB SHOTS OK')
   app.exit(0)
+}
+
+// capturePage only has the page; the native window buttons need a capture of the window.
+async function shootWindow(win: BrowserWindow): Promise<Buffer> {
+  const { width, height } = win.getBounds()
+  const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width, height } })
+  const own = sources.find((s) => s.id === win.getMediaSourceId())
+  if (!own) throw new Error('window capture not found')
+  return own.thumbnail.toPNG()
 }

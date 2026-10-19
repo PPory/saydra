@@ -48,6 +48,19 @@ function App() {
     window.rea.onUpdateChanged(setUpdate)
   }, [])
 
+  // Any modal's scrim also dims the window buttons Windows draws over the page.
+  useEffect(() => {
+    let dimmed = false
+    const check = () => {
+      const now = !!document.querySelector('.scrim')
+      if (now !== dimmed) window.rea.dimTitleBar((dimmed = now))
+    }
+    const watch = new MutationObserver(check)
+    watch.observe(document.body, { childList: true, subtree: true })
+    check()
+    return () => watch.disconnect()
+  }, [])
+
   const go = useCallback((p: HubPage) => {
     setPage(p)
     try {

@@ -119,6 +119,7 @@ export const HUB = {
   updateState: 'hub:update-state',
   updateCheck: 'hub:update-check',
   updateInstall: 'hub:update-install',
+  dimTitleBar: 'hub:dim-title-bar', // a modal's scrim is up: dim the native window buttons too
   // main -> hub
   changed: 'hub:changed',
   navigate: 'hub:navigate',

@@ -94,6 +94,7 @@ import {
   closeAnswerCard,
   createFloatingBar,
   getCard,
+  dimHubTitleBar,
   getHub,
   isCardVisible,
   openHub,
@@ -1027,6 +1028,7 @@ function wireIpc(): void {
   ipcMain.handle(HUB.updateState, () => getUpdateState())
   ipcMain.handle(HUB.updateCheck, () => checkForUpdates())
   ipcMain.handle(HUB.updateInstall, () => installUpdate())
+  ipcMain.on(HUB.dimTitleBar, (_e, dim: boolean) => dimHubTitleBar(dim))
   ipcMain.handle(HUB.permissions, () => (isMac ? macPermissions(usesFn(), Boolean(stopKeyHook)) : null))
   ipcMain.handle(HUB.grantPermission, (_e, kind: MacPermission) => isMac && grantMacPermission(kind))
   ipcMain.handle(HUB.relaunch, () => {
