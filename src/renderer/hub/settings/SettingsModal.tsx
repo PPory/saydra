@@ -309,6 +309,19 @@ function UpdateRow({ version, update }: { version: string; update: UpdateState }
   )
 }
 
+function UpdateNotes({ title, notes }: { title: string; notes: string[] }) {
+  return (
+    <div class="update-notes">
+      <span class="update-notes-title">{title}</span>
+      <ul>
+        {notes.map((n) => (
+          <li>{n}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function AboutPage({ update }: { update: UpdateState }) {
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => void window.rea.appInfo().then(setInfo), [])
@@ -317,15 +330,10 @@ function AboutPage({ update }: { update: UpdateState }) {
       <h2 class="set-title">关于</h2>
       <Section icon="info" title="Saydra">
         <UpdateRow version={info?.version ?? ''} update={update} />
-        {'notes' in update && update.notes.length > 0 && (
-          <div class="update-notes">
-            <span class="update-notes-title">{update.version} 更新了这些</span>
-            <ul>
-              {update.notes.map((n) => (
-                <li>{n}</li>
-              ))}
-            </ul>
-          </div>
+        {'notes' in update && update.notes.length > 0 ? (
+          <UpdateNotes title={`${update.version} 更新了这些`} notes={update.notes} />
+        ) : (
+          info && info.whatsNew.length > 0 && <UpdateNotes title={`这一版（${info.version}）更新了这些`} notes={info.whatsNew} />
         )}
         <Row
           title="怎么用"

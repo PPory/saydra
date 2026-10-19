@@ -325,7 +325,8 @@ button {
     opacity: 0;
   }
 }
-.page-actions [data-tip]:hover::after {
+.page-actions [data-tip]:hover::after,
+.modal-close[data-tip]:hover::after {
   bottom: auto;
   top: calc(100% + 6px);
 }

@@ -23,6 +23,23 @@ function lines(html: string): string[] {
     .filter(Boolean)
 }
 
+// The same from our own markdown notes: the "- " items, without bold, links or code marks.
+export function markdownNoteLines(md: string, max = 8): string[] {
+  return md
+    .split(/\r?\n/)
+    .filter((l) => /^\s*[-*] /.test(l))
+    .map((l) =>
+      l
+        .replace(/^\s*[-*] /, '')
+        .replace(/\*\*(.+?)\*\*/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .trim()
+    )
+    .filter(Boolean)
+    .slice(0, max)
+}
+
 export function releaseNoteLines(notes: Notes, max = 8): string[] {
   if (!notes) return []
   const all = typeof notes === 'string' ? lines(notes) : notes.flatMap((n) => (n.note ? lines(n.note) : []))

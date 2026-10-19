@@ -82,6 +82,7 @@ export interface MacPermissions {
 export interface AppInfo {
   version: string
   dataDir: string
+  whatsNew: string[] // what the running version changed (its bundled release notes)
 }
 
 // In-app update. 'available' is macOS only: there is a new release but it can't be installed in place.

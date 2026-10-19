@@ -41,6 +41,7 @@ import { checkKey, LONG_TEXT_CHARS, transcribe } from './groq'
 import { createDictationKeyMachine, type DictationKeyHandlers } from './hotkey'
 import { notifyHub, registerHubIpc } from './hub'
 import { checkForUpdates, getUpdateState, installUpdate, startUpdater } from './updater'
+import { bundledNotes } from './bundled-notes'
 import { runHubShots } from './hub-shots'
 import { ApiError, chatWithFallback, listModels, setFetch } from './llm'
 import { copySelection, pasteText } from './paste'
@@ -73,6 +74,8 @@ import {
   getShowIdleBar,
   getSiliconflowKey,
   getAutoUpdate,
+  getLastRunVersion,
+  setLastRunVersion,
   getRefineNotes,
   getTranslateTarget,
   isHiddenLaunch,
@@ -137,7 +140,8 @@ if (HUB_SHOTS) app.setPath('userData', join(tmpdir(), `saydra-hubshots-${Date.no
 // bar once the update is downloaded, then exits without installing.
 const UPDATE_TEST = process.env.REA_UPDATE_URL
 const UPDATE_SHOTS = process.env.REA_UPDATE_SHOTS
-if (UPDATE_TEST) app.setPath('userData', join(tmpdir(), `saydra-updatetest-${Date.now()}`))
+// REA_UPDATE_PROFILE=<dir> keeps the profile across runs (the 已更新 notice after a restart).
+if (UPDATE_TEST) app.setPath('userData', process.env.REA_UPDATE_PROFILE || join(tmpdir(), `saydra-updatetest-${Date.now()}`))
 
 // REA_ALERT_SHOTS=<dir>: show each kind of alert card on the bar, screenshot, exit.
 const ALERT_SHOTS = process.env.REA_ALERT_SHOTS
@@ -1121,15 +1125,41 @@ function onUpdateState(s: UpdateState): void {
       { label: '重启更新', action: 'install-update', primary: true }
     ]
   })
-  if (UPDATE_SHOTS) void shootUpdate(UPDATE_SHOTS)
+  if (UPDATE_SHOTS) void shootUpdate(UPDATE_SHOTS, 'update')
 }
 
-async function shootUpdate(dir: string): Promise<void> {
+// First start of a new version, updated in the app or installed over an older one: say
+// so once, with the way to see what changed. Versions before 0.2.8 didn't record the
+// last run, so an empty record with dictations in the history also counts as an update.
+function announceUpdated(): void {
+  const version = app.getVersion()
+  const last = getLastRunVersion()
+  setLastRunVersion(version)
+  if (last === version || (!last && getDb().stats().totalWords === 0)) return
+  const notes = bundledNotes(version)
+  // The bar page subscribes to alerts a moment after it loads.
+  bar.webContents.once('did-finish-load', () =>
+    setTimeout(
+      () =>
+        showAlert({
+          id: 'updated',
+          title: `已更新到 Saydra ${version}`,
+          actions: notes.length ? [{ label: '更新了什么', action: 'show-update' }] : undefined,
+          autoHideMs: 8000
+        }),
+      1500
+    )
+  )
+  if (UPDATE_SHOTS) setTimeout(() => void shootUpdate(UPDATE_SHOTS, 'updated'), 3000)
+}
+
+async function shootUpdate(dir: string, name: string): Promise<void> {
+  const barShot = await bar.webContents.capturePage()
   openHub('about')
   await new Promise((r) => setTimeout(r, 2000))
   const hub = getHub()
-  if (hub) await writeFile(join(dir, 'update-about.png'), (await hub.webContents.capturePage()).toPNG())
-  await writeFile(join(dir, 'update-bar.png'), (await bar.webContents.capturePage()).toPNG())
+  if (hub) await writeFile(join(dir, `${name}-about.png`), (await hub.webContents.capturePage()).toPNG())
+  await writeFile(join(dir, `${name}-bar.png`), barShot.toPNG())
   app.exit(0)
 }
 
@@ -1267,6 +1297,7 @@ app.whenReady().then(() => {
   if (HUB_SHOTS) return void runHubShots(getDb(), HUB_SHOTS).catch((err) => (console.error(err), app.exit(1)))
   if (LEARN_TEST) return void runLearnTest().catch((err) => (console.error(err), app.exit(1)))
   if (ALERT_SHOTS) return void runAlertShots(ALERT_SHOTS).catch((err) => (console.error(err), app.exit(1)))
+  if (!SELFTEST_WAV) announceUpdated()
   if (!SELFTEST_WAV) startUpdater({ enabled: getAutoUpdate, onChange: onUpdateState, log: (line) => appendLog('update.log', line) })
 
   if (SELFTEST_WAV) {

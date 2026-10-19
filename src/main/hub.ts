@@ -3,6 +3,7 @@ import { app, dialog, ipcMain, shell } from 'electron'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { HUB, type AppInfo, type DictSource, type HistoryTab, type HubChange, type ShortcutTarget } from '../shared/hub'
 import { toItem } from './db'
+import { bundledNotes } from './bundled-notes'
 import type { ShortcutCapture } from './shortcut-capture'
 import { deleteFiles, getDb } from './store'
 import { getHub, showAnswerCard } from './windows'
@@ -93,7 +94,11 @@ export function registerHubIpc(deps: { retry: (id: string) => Promise<string | n
     return { ok: true, message: `${added} 个词已添加${skipped ? `，${skipped} 个已存在` : ''}` }
   })
 
-  ipcMain.handle(HUB.appInfo, (): AppInfo => ({ version: app.getVersion(), dataDir: app.getPath('userData') }))
+  ipcMain.handle(HUB.appInfo, (): AppInfo => ({
+    version: app.getVersion(),
+    dataDir: app.getPath('userData'),
+    whatsNew: bundledNotes(app.getVersion())
+  }))
   ipcMain.handle(HUB.openDataDir, () => shell.openPath(app.getPath('userData')))
   ipcMain.handle(HUB.captureShortcut, (_e, target: ShortcutTarget) => deps.capture.start(target))
   ipcMain.handle(HUB.cancelCapture, () => deps.capture.cancel())

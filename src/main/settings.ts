@@ -31,6 +31,7 @@ interface Schema {
   muteWhileDictating: boolean
   showIdleBar: boolean // the idle handle stays on screen; off = only while dictating
   autoUpdate: boolean // check GitHub releases on start and every few hours
+  lastRunVersion: string // a different version on start means it was just updated
   mutedByApp: boolean // we muted the speakers; undo it after a crash
 }
 
@@ -61,6 +62,7 @@ const createStore = () => new Store<Schema>({
     muteWhileDictating: true,
     showIdleBar: true,
     autoUpdate: true,
+    lastRunVersion: '',
     mutedByApp: false
   }
 })
@@ -112,6 +114,8 @@ export function setTranslationActive(code: string): void {
 export const getMuteWhileDictating = (): boolean => store().get('muteWhileDictating')
 export const getShowIdleBar = (): boolean => store().get('showIdleBar')
 export const getAutoUpdate = (): boolean => store().get('autoUpdate')
+export const getLastRunVersion = (): string => store().get('lastRunVersion')
+export const setLastRunVersion = (v: string) => store().set('lastRunVersion', v)
 export const getMutedByApp = (): boolean => store().get('mutedByApp')
 export const setMutedByApp = (on: boolean): void => store().set('mutedByApp', on)
 export const getSaveRecordings = (): boolean => store().get('saveRecordings')
