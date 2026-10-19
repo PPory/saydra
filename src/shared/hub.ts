@@ -93,6 +93,7 @@ export type UpdateState =
   | { kind: 'available'; version: string; notes: string[] }
   | { kind: 'downloading'; version: string; notes: string[]; percent: number }
   | { kind: 'ready'; version: string; notes: string[] }
+  | { kind: 'installing'; version: string } // quitting so the installer can run
   | { kind: 'error'; message: string }
 
 export const HUB = {

@@ -169,6 +169,7 @@ export const IPC = {
   recordingFailed: 'bar:recording-failed',
   barAction: 'bar:action',
   barInteractive: 'bar:interactive', // pointer is over the pill or a card: take clicks
+  barHitRects: 'bar:hit-rects', // where the pill and cards are, [left, top, right, bottom] each
   resendCancelled: 'bar:resend-cancelled', // main -> bar: undo a cancel, send the kept audio
   decodeAudio: 'bar:decode-audio', // main -> bar: webm -> 16 kHz PCM for retrying a saved recording
   decodedAudio: 'bar:decoded-audio',

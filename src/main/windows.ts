@@ -45,6 +45,7 @@ export function createFloatingBar(): BrowserWindow {
   win.setAlwaysOnTop(true, 'screen-saver')
   floatEverywhere(win)
   setBarInteractive(win, false)
+  watchBarPointer(win)
   load(win, 'floating-bar')
   win.once('ready-to-show', () => {
     placeBar(win)
@@ -55,9 +56,38 @@ export function createFloatingBar(): BrowserWindow {
 
 // forward: the page still gets mouse-move events, so it can tell when the
 // pointer reaches the pill and ask for clicks.
+let barIgnoresMouse = true
+let barHitRects: number[][] = []
+
 export function setBarInteractive(win: BrowserWindow, interactive: boolean): void {
+  barIgnoresMouse = !interactive
   if (interactive) win.setIgnoreMouseEvents(false)
   else win.setIgnoreMouseEvents(true, { forward: true })
+}
+
+export function setBarHitRects(rects: number[][]): void {
+  barHitRects = rects
+}
+
+export const barTakesClicks = (): boolean => !barIgnoresMouse
+
+// On Windows those forwarded moves come from a low-level mouse hook, which Windows
+// drops without a word when the main thread stalls for a moment (finishing a big
+// update download did it), and from then on no card takes a click. So the pointer
+// is also checked from here: on the pill or a card, the bar takes clicks, and the
+// page gets ordinary mouse events again. Taking clicks also sets the hook up anew.
+const POINTER_CHECK_MS = 100
+
+function watchBarPointer(win: BrowserWindow): void {
+  const timer = setInterval(() => {
+    if (win.isDestroyed()) return clearInterval(timer)
+    if (!barIgnoresMouse || !barHitRects.length || !win.isVisible()) return
+    const cursor = screen.getCursorScreenPoint()
+    const { x: left, y: top } = win.getBounds()
+    const x = cursor.x - left
+    const y = cursor.y - top
+    if (barHitRects.some(([l, t, r, b]) => x >= l && x < r && y >= t && y < b)) setBarInteractive(win, true)
+  }, POINTER_CHECK_MS)
 }
 
 // Before each dictation: other always-on-top windows (shell flyouts, screenshot

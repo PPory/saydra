@@ -187,6 +187,41 @@ function TranslateChip({ target }: { target: TranslateTarget }) {
   )
 }
 
+// Tell the main process where the pill and cards are: it checks the pointer against
+// them too, in case the forwarded mouse moves stop arriving (see watchBarPointer).
+const HIT_TARGETS = '.alert, .pill:not([data-hidden]), .tchip-wrap, .tchip-pop'
+
+function watchHitRects(): () => void {
+  const stage = document.querySelector('.stage')!
+  let frame = 0
+  let sent = ''
+  const send = () => {
+    frame = 0
+    const rects = [...document.querySelectorAll(HIT_TARGETS)]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width && r.height)
+      .map((r) => [r.left, r.top, r.right, r.bottom].map(Math.round))
+    const json = JSON.stringify(rects)
+    if (json !== sent) window.rea.setHitRects(rects)
+    sent = json
+  }
+  const schedule = () => (frame ||= requestAnimationFrame(send))
+  const mutations = new MutationObserver(schedule)
+  mutations.observe(stage, { subtree: true, childList: true, attributes: true })
+  const sizes = new ResizeObserver(schedule)
+  sizes.observe(stage)
+  // Cards slide in: measure again once they have settled.
+  stage.addEventListener('animationend', schedule)
+  stage.addEventListener('transitionend', schedule)
+  schedule()
+  return () => {
+    mutations.disconnect()
+    sizes.disconnect()
+    stage.removeEventListener('animationend', schedule)
+    stage.removeEventListener('transitionend', schedule)
+  }
+}
+
 function App() {
   const [view, setView] = useState<BarView>({ kind: 'idle' })
   const [mic, setMic] = useState<MicStatus>('off')
@@ -232,6 +267,8 @@ function App() {
     window.rea.onAlert((a) => setAlerts((list) => [...list.filter((x) => x.id !== a.id), a].slice(-2)))
     window.rea.onClearAlert((id) => setAlerts((list) => (id ? list.filter((x) => x.id !== id) : [])))
   }, [recorder])
+
+  useEffect(watchHitRects, [])
 
   // Auto-hide alerts, each on its own clock (another card closing doesn't reset it);
   // hovering holds them, leaving starts every countdown again.

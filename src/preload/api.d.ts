@@ -45,6 +45,7 @@ declare global {
       sendRecordingFailed(message: string): void
       sendAction(action: BarActionName): void
       setInteractive(interactive: boolean): void
+      setHitRects(rects: number[][]): void
       onDecodeAudio(cb: (reqId: string, audio: ArrayBuffer) => void): void
       sendDecoded(reqId: string, pcm: Float32Array | null): void
       translateTo(code: string): void

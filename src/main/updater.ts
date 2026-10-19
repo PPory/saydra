@@ -117,7 +117,7 @@ function errorMessage(err: unknown, downloading: boolean): string {
 }
 
 export async function checkForUpdates(): Promise<void> {
-  if (!started || ['checking', 'downloading', 'ready'].includes(state.kind)) return
+  if (!started || ['checking', 'downloading', 'ready', 'installing'].includes(state.kind)) return
   set({ kind: 'checking' })
   try {
     await autoUpdater.checkForUpdates()
@@ -127,7 +127,12 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 // Silent install, then start the new version. Goes through app.quit, so the
-// before-quit handler still gives the speakers back first.
+// before-quit handler still gives the speakers back first. The installer shows
+// nothing while it runs, so the bar and the hub get a moment to say what is coming.
+const INSTALL_AFTER_MS = 1500
+
 export function installUpdate(): void {
-  if (state.kind === 'ready') autoUpdater.quitAndInstall(true, true)
+  if (state.kind !== 'ready') return
+  set({ kind: 'installing', version: state.version })
+  setTimeout(() => autoUpdater.quitAndInstall(true, true), INSTALL_AFTER_MS)
 }

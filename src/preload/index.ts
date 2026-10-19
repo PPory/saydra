@@ -50,6 +50,7 @@ const api = {
   sendRecordingFailed: (message: string) => ipcRenderer.send(IPC.recordingFailed, message),
   sendAction: (action: BarActionName) => ipcRenderer.send(IPC.barAction, action),
   setInteractive: (interactive: boolean) => ipcRenderer.send(IPC.barInteractive, interactive),
+  setHitRects: (rects: number[][]) => ipcRenderer.send(IPC.barHitRects, rects),
   onDecodeAudio: (cb: (reqId: string, audio: ArrayBuffer) => void) => on(IPC.decodeAudio, cb),
   sendDecoded: (reqId: string, pcm: Float32Array | null) => ipcRenderer.send(IPC.decodedAudio, reqId, pcm),
   translateTo: (code: string) => ipcRenderer.send(IPC.translateTo, code),

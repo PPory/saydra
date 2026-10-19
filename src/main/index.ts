@@ -6,6 +6,7 @@ import {
   nativeImage,
   nativeTheme,
   net,
+  screen,
   session,
   shell,
   systemPreferences,
@@ -100,6 +101,8 @@ import {
   raiseBar,
   registerCardIpc,
   resizeCard,
+  barTakesClicks,
+  setBarHitRects,
   setBarInteractive,
   showAnswerCard
 } from './windows'
@@ -959,6 +962,7 @@ function wireIpc(): void {
   ipcMain.on(IPC.cardResize, (_e, height: number) => resizeCard(height))
   ipcMain.handle(IPC.copyText, (_e, text: string) => clipboard.writeText(text))
   ipcMain.on(IPC.barInteractive, (_e, interactive: boolean) => setBarInteractive(bar, interactive))
+  ipcMain.on(IPC.barHitRects, (_e, rects: number[][]) => setBarHitRects(rects))
   ipcMain.handle(IPC.getSettings, () => getPublicSettings())
   ipcMain.handle(IPC.saveSettings, async (_e, input) => {
     const retention = getHistoryRetention()
@@ -1123,6 +1127,8 @@ let updateAnnounced = ''
 function onUpdateState(s: UpdateState): void {
   getHub()?.webContents.send(HUB.updateChanged, s)
   refreshTray()
+  if (s.kind === 'installing')
+    return showAlert({ id: 'update', title: `正在更新到 Saydra ${s.version}`, description: '安装完会自动重新打开，请稍等片刻。' })
   if (s.kind !== 'ready' || updateAnnounced === s.version) return
   updateAnnounced = s.version
   showAlert({
@@ -1249,6 +1255,26 @@ async function runAlertShots(dir: string): Promise<void> {
   await wait(6500)
   const left = await bar.webContents.executeJavaScript(`document.querySelectorAll('.alert').length`)
   console.log(`  alerts left 6.5s after leaving: ${left}`)
+  // No forwarded mouse moves at all (as when Windows has dropped the mouse hook): the
+  // bar must still take clicks once the pointer is on a card. Moves the bar under the
+  // pointer instead of moving the pointer.
+  showAlert({ id: 'update', title: 'Saydra 9.9.9 已准备好', actions: [{ label: '重启更新', action: 'pill-click', primary: true }] })
+  await wait(800)
+  setBarInteractive(bar, true)
+  bar.setIgnoreMouseEvents(true) // forwarding off, so its hook is gone
+  setBarInteractive(bar, false)
+  bar.setIgnoreMouseEvents(true)
+  const btn = await bar.webContents.executeJavaScript(
+    `(() => { const r = document.querySelector('.alert .btn.primary').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()`
+  )
+  const takesBefore = barTakesClicks()
+  // Follows the pointer, in case the person at the computer is moving it.
+  for (let i = 0; i < 20 && !barTakesClicks(); i++) {
+    const cursor = screen.getCursorScreenPoint()
+    bar.setPosition(Math.round(cursor.x - btn[0]), Math.round(cursor.y - btn[1]))
+    await wait(50)
+  }
+  console.log(`  pointer on a card without forwarded moves: takes clicks ${takesBefore} -> ${barTakesClicks()}`)
   app.exit(0)
 }
 

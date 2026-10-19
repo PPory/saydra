@@ -283,6 +283,7 @@ function UpdateRow({ version, update }: { version: string; update: UpdateState }
     available: `新版本 ${'version' in update ? update.version : ''} 可以下载了`,
     downloading: `正在下载新版本 ${'version' in update ? update.version : ''}（${update.kind === 'downloading' ? update.percent : 0}%）`,
     ready: `新版本 ${'version' in update ? update.version : ''} 已就绪，重启即可更新`,
+    installing: `正在更新到 ${'version' in update ? update.version : ''}，安装完会自动重新打开`,
     error: update.kind === 'error' ? update.message : ''
   }
   const text = status[update.kind]
@@ -293,8 +294,8 @@ function UpdateRow({ version, update }: { version: string; update: UpdateState }
   )
   return (
     <Row title="版本" description={text ? `${version} · ${text}` : version}>
-      {update.kind === 'ready' && (
-        <Button variant="primary" onClick={() => void window.rea.updateInstall()}>
+      {(update.kind === 'ready' || update.kind === 'installing') && (
+        <Button variant="primary" loading={update.kind === 'installing'} onClick={() => void window.rea.updateInstall()}>
           重启更新
         </Button>
       )}
