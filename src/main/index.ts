@@ -19,6 +19,7 @@ import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { HUB, type AskResult, type MacPermission, type UpdateState } from '../shared/hub'
 import { shortcutLabel, VK, type DictationMode } from '../shared/keys'
 import { findLanguage } from '../shared/languages'
@@ -41,9 +42,10 @@ import { finishTracking, initAutoLearn, learnFrom, noteKey, trackPaste, type Lea
 import { getFocusContext } from './context'
 import { checkKey, LONG_TEXT_CHARS, transcribe } from './groq'
 import { createDictationKeyMachine, type DictationKeyHandlers } from './hotkey'
-import { notifyHub, registerHubIpc } from './hub'
+import { diagnostics, notifyHub, registerHubIpc } from './hub'
 import { checkForUpdates, getUpdateState, installUpdate, startUpdater } from './updater'
 import { bundledNotes } from './bundled-notes'
+import { perfLine, type PerfValue } from './diagnostics'
 import { runHubShots } from './hub-shots'
 import { ApiError, chatWithFallback, listModels, setFetch } from './llm'
 import { copySelection, pasteText } from './paste'
@@ -178,6 +180,7 @@ let cancelledJob: Job | null = null // for 撤销 on 「转录已取消」 after
 let ctx: FocusContext | null = null
 let mode: DictationMode = 'dictate'
 let recordStartedAt = 0
+let stoppedAt = 0 // the user stopped talking; 0 once the audio has been taken (perf.log)
 let handsFree = false
 let view: BarView = { kind: 'idle' }
 // 问任何问题: the text selected when the mode began, read while the user talks.
@@ -202,6 +205,8 @@ interface Job {
   selection?: Promise<string | null> | null // 问任何问题 only
   inputBefore?: Promise<string | null> | null
   cancelled?: boolean // Esc while processing: the result is dropped
+  stoppedAt?: number // when the user stopped talking; only the first run of a job has it (perf.log)
+  stopMs?: number // stopping until the audio reached us
 }
 
 // What a mode produced from the transcript, and how to deliver it.
@@ -211,6 +216,7 @@ interface Output {
   model: string
   askResult: AskResult | null
   selectedText: string | null
+  fallback?: string // services that failed before one answered, e.g. 「Groq:rate_limit」
 }
 // Last failed dictation, kept for the retry button on the alert card.
 let pending: Job | null = null
@@ -270,6 +276,7 @@ interface Recognized {
   raw: string
   engine: AsrEngine
   heard?: string | null // see whisperReference
+  waitedMs?: number // held up waiting for whisperReference after recognition finished
 }
 
 // 词典 「常被识别成」: the user's fixed replacements.
@@ -293,8 +300,10 @@ async function recognize(job: Job): Promise<Recognized> {
   if (cloud || (engine === 'local' && !localAsrFailed())) {
     const reference = whisperReference(job)
     const finish = async (said: string, from: AsrEngine): Promise<Recognized> => {
+      const t = performance.now()
       const heard = /[A-Za-z]/.test(said) && !job.cancelled ? await reference : null
-      return { raw: applyHeardAs(fixEnglishCase(said, getDb().terms())), engine: from, heard }
+      const waitedMs = performance.now() - t
+      return { raw: applyHeardAs(fixEnglishCase(said, getDb().terms())), engine: from, heard, waitedMs }
     }
     try {
       if (cloud) return await finish(await transcribeSiliconFlow(getSiliconflowKey(), job.audio, job.mimeType), 'siliconflow')
@@ -370,6 +379,7 @@ async function refineDictation(job: Job, { raw, engine, heard }: Recognized): Pr
     })
     for (const e of res.errors) console.warn(`refine via ${e.provider} failed, fell back:`, e.message)
     out.model = res.target.model
+    out.fallback = failures(res.errors)
     // Cleanup trims fillers, never half the content; a much shorter result
     // means the model summarised, so keep the user's words instead.
     // Again on the result, in case the model put a misheard form back.
@@ -377,9 +387,14 @@ async function refineDictation(job: Job, { raw, engine, heard }: Recognized): Pr
     if (text && text.length >= raw.length * 0.5) out.text = applyHeardAs(text)
   } catch (err) {
     console.warn('refine failed, pasting raw transcript', err) // degrade, never lose the words
+    out.fallback = failures([err])
   }
   return out
 }
+
+// For perf.log: which services failed and how, never the message.
+const failures = (errs: unknown[]): string =>
+  errs.map((e) => (e instanceof ApiError ? `${e.provider || 'service'}:${e.kind}` : 'other')).join(',')
 
 // 翻译: the transcript in the language picked on the bar. Pasting the
 // untranslated words would be wrong, so a failure shows the retry card instead.
@@ -392,7 +407,14 @@ async function translate(job: Job, { raw, heard }: Recognized): Promise<Output> 
     maxTokens: Math.ceil(raw.length * 2) + 300
   })
   if (!res.text) throw new Error('翻译结果为空')
-  return { text: res.text, prompt: raw, model: res.target.model, askResult: null, selectedText: null }
+  return {
+    text: res.text,
+    prompt: raw,
+    model: res.target.model,
+    askResult: null,
+    selectedText: null,
+    fallback: failures(res.errors)
+  }
 }
 
 // 问任何问题: rewrite the selection in place, or answer on the card. SenseVoice's
@@ -419,7 +441,14 @@ async function askAnything(job: Job, { raw, engine, heard }: Recognized): Promis
   )
   const reply = selectedText ? parseAskReply(res.text) : { kind: 'answer' as const, text: res.text }
   if (!reply.text) throw new Error('回答为空')
-  return { text: reply.text, prompt: await tidy, model: res.target.model, askResult: reply.kind, selectedText }
+  return {
+    text: reply.text,
+    prompt: await tidy,
+    model: res.target.model,
+    askResult: reply.kind,
+    selectedText,
+    fallback: failures(res.errors)
+  }
 }
 
 // Self-test: let the answer card render, optionally screenshot it.
@@ -446,17 +475,39 @@ async function processRecording(job: Job): Promise<string | null> {
   currentJob = job
   if (!job.fromHub) setView(processingView(job.mode))
   const audioFile = audioFileFor(job)
+  // perf.log: what each stage cost, written however the job ends (fields: diagnostics.ts).
+  // A retry or 撤销 of this job runs again without the stop timings.
+  const stoppedAt = job.stoppedAt
+  const perf: Record<string, PerfValue> = {
+    rec: job.recordMs,
+    mic: job.voice.micOpenMs,
+    stop: job.stopMs,
+    asr: null,
+    whisper: null,
+    refine: null,
+    model: null,
+    fallback: null,
+    paste: null,
+    wait: null,
+    lag: null,
+    chars: null,
+    result: 'cancelled'
+  }
+  job.stoppedAt = job.stopMs = undefined
   try {
     let t = performance.now()
     const rec = await recognize(job)
     const { raw, engine } = rec
     const transcribeMs = performance.now() - t
+    perf.asr = `${engine}:${Math.round(transcribeMs - (rec.waitedMs ?? 0))}`
+    perf.whisper = rec.waitedMs
     if (job.cancelled) return null
     // REA_SELFTEST_CANCEL=refining: Esc while the text is being refined
     if (SELFTEST_WAV && process.env.REA_SELFTEST_CANCEL === 'refining' && !job.fromHub && !selftestCancelled) selftestCancel()
     // What the focused box holds before we paste, to tell afterwards whether it took it.
     const beforePaste = job.fromHub || SELFTEST_WAV ? null : focusInfo(PASTE_CHECK_CHARS)
     if (!raw) {
+      perf.result = 'no-speech'
       if (job.fromHub) return '没有检测到语音'
       setView({ kind: 'idle' })
       showAlert({ title: '没有检测到语音', description: '请靠近麦克风再说一次。', autoHideMs: 3000 })
@@ -464,6 +515,7 @@ async function processRecording(job: Job): Promise<string | null> {
     }
     // Only 「嗯」「呃」: nothing to type, so neither the model nor the paste is bothered.
     if (job.mode === 'dictate' && isFillerOnly(raw, job.ctx?.scene ?? 'other')) {
+      perf.result = 'filler'
       if (job.fromHub) return '只听到了语气词'
       setView({ kind: 'idle' })
       showAlert({ title: '只听到了语气词', description: '这次没有输入任何内容。', autoHideMs: 3000 })
@@ -477,18 +529,29 @@ async function processRecording(job: Job): Promise<string | null> {
           ? await askAnything(job, rec)
           : await refineDictation(job, rec)
     const refineMs = performance.now() - t
+    Object.assign(perf, { refine: refineMs, model: out.model, fallback: out.fallback })
     if (job.cancelled) return null
+    // What the user waited: stopping talking until the text is typed (or the answer shows).
+    const delivered = () => stoppedAt && (perf.wait = Date.now() - stoppedAt)
     if (!job.fromHub) {
       if (out.askResult === 'answer') {
         showAnswerCard({ prompt: out.prompt, selectedText: out.selectedText, answer: out.text })
         setView({ kind: 'done' })
       } else if (!SELFTEST_WAV) {
-        const landed = await pasteText(out.text, () => checkPaste(beforePaste, out.text))
+        t = performance.now()
+        const landed = await pasteText(
+          out.text,
+          () => checkPaste(beforePaste, out.text),
+          () => ((perf.paste = performance.now() - t), delivered())
+        )
         setView({ kind: 'done' })
         if (landed === false) pasteMissedAlert(out.text)
         else void trackPaste(out.text)
       }
     }
+    if (perf.wait === null) delivered()
+    perf.chars = out.text.length
+    perf.result = 'ok'
     pending = null
     if (keepHistory()) {
       try {
@@ -511,6 +574,8 @@ async function processRecording(job: Job): Promise<string | null> {
       }
     }
     if (SELFTEST_WAV) {
+      // 关于 → 诊断信息 as a user would copy it; this run's perf line is written after, so it lists earlier runs.
+      if (!job.fromHub) console.log(`--- diagnostics ---\n${await diagnostics()}\n---`)
       // REA_SELFTEST_RETRY=1: then retry the saved recording as 历史记录 → 重试 would.
       const retryNext = process.env.REA_SELFTEST_RETRY && !job.fromHub
       console.log(`SELFTEST ${job.fromHub ? 'RETRY ' : ''}OK
@@ -531,6 +596,7 @@ async function processRecording(job: Job): Promise<string | null> {
     return null
   } catch (err) {
     if (job.cancelled) return null
+    perf.result = `error:${err instanceof ApiError ? err.kind : 'other'}`
     const { retry, ...alert } = alertFor(err)
     if (keepHistory()) {
       try {
@@ -563,8 +629,17 @@ async function processRecording(job: Job): Promise<string | null> {
       busy = false
     }
     savedAudio.delete(job.id)
+    if (!job.fromHub) {
+      perf.lag = loopDelay.max / 1e6
+      appendLog('perf.log', perfLine(job.mode, perf))
+    }
   }
 }
+
+// The longest the main process went unresponsive since the dictation began (perf.log
+// 「lag」): a stalled main thread is what makes the bar feel stuck.
+const loopDelay = monitorEventLoopDelay({ resolution: 20 })
+loopDelay.enable()
 
 // Read the box again after Ctrl+V; a slow app gets one more look before we call it a miss.
 async function checkPaste(before: Promise<FocusInfo | null> | null, text: string): Promise<boolean | null> {
@@ -801,6 +876,7 @@ const keyHandlers: DictationKeyHandlers = {
     if (m === 'ask') beginAsk()
     scheduleMute(++recordingSeq)
     recordStartedAt = Date.now()
+    loopDelay.reset()
     warmUpConnections()
     ctx = null
     void getFocusContext().then((c) => (ctx = c))
@@ -830,6 +906,7 @@ const keyHandlers: DictationKeyHandlers = {
   },
   onStop: () => {
     busy = true // until the audio arrives and is processed
+    stoppedAt = Date.now()
     setView(processingView(mode))
     // Sound back on first, so the stop cue is heard.
     const unmuted = Promise.race([restoreAudio(), new Promise((r) => setTimeout(r, STOP_CUE_WAIT_MS))])
@@ -904,6 +981,9 @@ function wireIpc(): void {
       // Esc came between stopping and the audio arriving: keep it for 撤销, don't process.
       const cancelled = cancelBeforeJob
       cancelBeforeJob = false
+      // 撤销 of a cancelled recording resends it later: no stop timings for that one.
+      const stopped = stoppedAt && !cancelled ? stoppedAt : undefined
+      stoppedAt = 0
       if (cancelled && (!audio.byteLength || voice.voicedMs < MIN_VOICED_MS)) return
       // Empty means the mic never started; its error is already on the bar.
       if (!audio.byteLength) {
@@ -928,7 +1008,9 @@ function wireIpc(): void {
         recordMs: Date.now() - recordStartedAt,
         voice,
         selection: mode === 'ask' ? selection : null,
-        inputBefore
+        inputBefore,
+        stoppedAt: stopped,
+        stopMs: stopped && Date.now() - stopped
       }
       if (cancelled) cancelledJob = job
       else void processRecording(job)

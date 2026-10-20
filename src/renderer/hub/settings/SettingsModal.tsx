@@ -325,7 +325,13 @@ function UpdateNotes({ title, notes }: { title: string; notes: string[] }) {
 
 function AboutPage({ update }: { update: UpdateState }) {
   const [info, setInfo] = useState<AppInfo | null>(null)
+  const [copied, setCopied] = useState(false)
   useEffect(() => void window.rea.appInfo().then(setInfo), [])
+  const copyDiagnostics = async () => {
+    await window.rea.copyDiagnostics()
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
   return (
     <div class="set-page">
       <h2 class="set-title">关于</h2>
@@ -344,6 +350,11 @@ function AboutPage({ update }: { update: UpdateState }) {
           title="隐私"
           description="录音和历史只存在本机。识别默认在本机完成；选了云端识别，或填了 Groq key（用来再听一遍英文）时，录音会发给对应的服务。润色把转写文字发给你配置的服务。检查更新只连接 GitHub。"
         />
+        <Row title="诊断信息" description="觉得慢或出错时，复制后发给开发者。只有耗时和设置，不含你说的话和 key。">
+          <Button variant="outline" onClick={() => void copyDiagnostics()}>
+            {copied ? '✓ 已复制' : '复制'}
+          </Button>
+        </Row>
         <Row title="数据位置" description={info?.dataDir ?? ''}>
           <Button variant="outline" onClick={() => void window.rea.openDataDir()}>
             打开

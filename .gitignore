@@ -29,3 +29,4 @@ promo/public/apps/feishu-chat.png
 
 # python bytecode
 __pycache__/
+.wrangler/

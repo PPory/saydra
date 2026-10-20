@@ -111,6 +111,7 @@ export const HUB = {
   dictImport: 'hub:dict-import',
   appInfo: 'hub:app-info',
   openDataDir: 'hub:open-data-dir',
+  copyDiagnostics: 'hub:copy-diagnostics', // timings and setup to the clipboard, for 「觉得慢」 reports
   captureShortcut: 'hub:capture-shortcut',
   cancelCapture: 'hub:cancel-capture',
   permissions: 'hub:permissions', // macOS; null elsewhere

@@ -1,9 +1,16 @@
 // IPC for the hub window: stats, history, dictionary, shortcut recording.
-import { app, dialog, ipcMain, shell } from 'electron'
+import { app, clipboard, dialog, ipcMain, session, shell } from 'electron'
 import { readFile, stat, writeFile } from 'node:fs/promises'
+import { cpus, freemem, totalmem } from 'node:os'
+import { join } from 'node:path'
 import { HUB, type AppInfo, type DictSource, type HistoryTab, type HubChange, type ShortcutTarget } from '../shared/hub'
+import type { AsrEngine } from '../shared/types'
+import { localAsrFailed } from './asr'
 import { toItem } from './db'
 import { bundledNotes } from './bundled-notes'
+import { formatDiagnostics } from './diagnostics'
+import { refineTargets } from './providers'
+import { getApiKey, getAsrEngine } from './settings'
 import type { ShortcutCapture } from './shortcut-capture'
 import { deleteFiles, getDb } from './store'
 import { getHub, showAnswerCard } from './windows'
@@ -19,6 +26,36 @@ const WORD_ERRORS = {
   'too-long': '名称超过了长度限制。',
   exists: '这个词已经在词典里了'
 } as const
+
+const ASR_NAMES: Record<AsrEngine, string> = {
+  local: '本地 SenseVoice',
+  siliconflow: '硅基流动 SenseVoice',
+  groq: 'Groq Whisper'
+}
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
+
+// 关于 → 诊断信息: the machine, the network route and the services in use (names
+// and model ids, never keys or full addresses), then the recent perf.log.
+export async function diagnostics(): Promise<string> {
+  const dir = app.getPath('userData')
+  const read = (name: string) => readFile(join(dir, name), 'utf8').catch(() => '')
+  const cpu = cpus()
+  const appMb = app.getAppMetrics().reduce((sum, m) => sum + m.memory.workingSetSize, 0) / 1024
+  const proxy = await session.defaultSession.resolveProxy('https://api.groq.com').catch(() => '?')
+  const engine = getAsrEngine()
+  const failed = engine === 'local' ? localAsrFailed() : null
+  const refine = refineTargets(0).map((t) => `${t.endpoint.name} ${t.model}`)
+  const about = [
+    `Saydra ${app.getVersion()} · ${process.platform === 'darwin' ? 'macOS' : 'Windows'} ${process.getSystemVersion()} · ${process.arch}`,
+    `CPU：${cpu[0]?.model.trim() ?? '?'} ×${cpu.length} · 内存 ${gb(totalmem())}（空闲 ${gb(freemem())}）· Saydra 占用 ${Math.round(appMb)} MB`,
+    `网络：连 Groq 走 ${proxy}`,
+    // A load error may name a file under the user's home folder: leave the path out.
+    `识别：${ASR_NAMES[engine]}${failed ? `（本地模型加载失败：${failed.message.replace(/[A-Za-z]:\\\S*|\/Users\/\S*/g, '<路径>')}）` : ''}` +
+      (engine !== 'groq' && getApiKey() ? ' · 有 Groq key，英文会让 Whisper 再听一遍' : ''),
+    `润色：${refine.length ? refine.join(' → 备用 ') : '未配置'}`
+  ]
+  return formatDiagnostics({ about, perfLog: await read('perf.log'), barLog: await read('bar.log') })
+}
 
 // One word per line; the first column of a CSV row.
 function parseWordList(text: string): string[] {
@@ -100,6 +137,7 @@ export function registerHubIpc(deps: { retry: (id: string) => Promise<string | n
     whatsNew: bundledNotes(app.getVersion())
   }))
   ipcMain.handle(HUB.openDataDir, () => shell.openPath(app.getPath('userData')))
+  ipcMain.handle(HUB.copyDiagnostics, async () => clipboard.writeText(await diagnostics()))
   ipcMain.handle(HUB.captureShortcut, (_e, target: ShortcutTarget) => deps.capture.start(target))
   ipcMain.handle(HUB.cancelCapture, () => deps.capture.cancel())
 }

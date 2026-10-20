@@ -86,7 +86,7 @@ export async function runHubShots(db: Db, dir: string): Promise<void> {
   await wait(2500)
   const win = getHub()
   if (!win) throw new Error('hub did not open')
-  const routes: HubRoute[] = ['home', 'history', 'dictionary', 'settings', 'models', 'welcome']
+  const routes: HubRoute[] = ['home', 'history', 'dictionary', 'settings', 'models', 'about', 'welcome']
   for (const theme of ['light', 'dark'] as const) {
     nativeTheme.themeSource = theme
     for (const route of routes) {
@@ -135,7 +135,7 @@ export async function runHubShots(db: Db, dir: string): Promise<void> {
         const rest = await win.webContents.capturePage()
         await writeFile(join(dir, `${theme}-${route}-bottom.png`), rest.toPNG())
       }
-      if (route === 'settings' || route === 'models' || route === 'welcome') win.webContents.send('hub:navigate', 'home')
+      if (route === 'settings' || route === 'models' || route === 'about' || route === 'welcome') win.webContents.send('hub:navigate', 'home')
     }
   }
   console.log('HUB SHOTS OK')

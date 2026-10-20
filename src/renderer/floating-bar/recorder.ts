@@ -47,9 +47,14 @@ export function createRecorder(onStatus: (status: MicStatus, analyser: AnalyserN
   let wantPcm = false
   let voicedMs = 0
   let peakRms = 0
+  let micOpenMs = 0
   let lastCancelled: Kept | null = null // kept for 「撤销」 on the cancelled alert
 
-  const voice = (): VoiceStats => ({ voicedMs: Math.round(voicedMs), peakRms: Number(peakRms.toFixed(4)) })
+  const voice = (): VoiceStats => ({
+    voicedMs: Math.round(voicedMs),
+    peakRms: Number(peakRms.toFixed(4)),
+    micOpenMs: Math.round(micOpenMs)
+  })
 
   async function send(k: Kept): Promise<void> {
     const pcm = k.wantPcm ? await decodePcm(k.blob) : null
@@ -86,6 +91,7 @@ export function createRecorder(onStatus: (status: MicStatus, analyser: AnalyserN
     voicedMs = peakRms = 0
     discard = stopRequested = false
     opening = true
+    const askedAt = performance.now()
     onStatus('opening', null)
     try {
       stream = await openMic(req.deviceId)
@@ -124,6 +130,7 @@ export function createRecorder(onStatus: (status: MicStatus, analyser: AnalyserN
       else void send(kept)
     }
     recorder.start(250)
+    micOpenMs = performance.now() - askedAt
     onStatus('live', analyser)
     // The key may have been released while the mic was still opening.
     if (stopRequested) recorder.stop()

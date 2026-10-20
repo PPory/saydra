@@ -78,12 +78,18 @@ export async function copySelection(appName: string | null): Promise<string | nu
 
 // Paste via clipboard + Ctrl+V, then put the user's clipboard back. `landed` checks
 // whether the paste went anywhere (null: not checked or can't tell); the caller
-// offers 复制 when it didn't. The clipboard is restored either way.
-export async function pasteText(text: string, landed?: () => Promise<boolean | null>): Promise<boolean | null> {
+// offers 复制 when it didn't. The clipboard is restored either way. `pressed` marks
+// the moment the text goes in, for perf.log.
+export async function pasteText(
+  text: string,
+  landed?: () => Promise<boolean | null>,
+  pressed?: () => void
+): Promise<boolean | null> {
   const backup = await snapshot()
   await writeTransientText(text)
   await sleep(30)
   platform.pressPaste()
+  pressed?.()
   // Give the target app time to read the clipboard before restoring it.
   await sleep(300)
   const ok = landed ? await landed().catch(() => null) : null

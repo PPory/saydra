@@ -73,6 +73,7 @@ export interface AnswerPayload {
 export interface VoiceStats {
   voicedMs: number // time the mic level was above the voice threshold
   peakRms: number
+  micOpenMs?: number // asking for the microphone until it was recording (perf.log)
 }
 
 // siliconflow: the same SenseVoice in 硅基流动's cloud, so the local model stays unloaded

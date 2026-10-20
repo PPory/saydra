@@ -90,6 +90,7 @@ const api = {
   dictImport: (): Promise<Result> => ipcRenderer.invoke(HUB.dictImport),
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(HUB.appInfo),
   openDataDir: (): Promise<void> => ipcRenderer.invoke(HUB.openDataDir),
+  copyDiagnostics: (): Promise<void> => ipcRenderer.invoke(HUB.copyDiagnostics),
   captureShortcut: (target: ShortcutTarget): Promise<CaptureResult> => ipcRenderer.invoke(HUB.captureShortcut, target),
   cancelCapture: (): Promise<void> => ipcRenderer.invoke(HUB.cancelCapture),
   permissions: (): Promise<MacPermissions | null> => ipcRenderer.invoke(HUB.permissions),

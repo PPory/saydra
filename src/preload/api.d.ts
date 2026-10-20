@@ -80,6 +80,7 @@ declare global {
       dictImport(): Promise<Result>
       appInfo(): Promise<AppInfo>
       openDataDir(): Promise<void>
+      copyDiagnostics(): Promise<void>
       captureShortcut(target: ShortcutTarget): Promise<CaptureResult>
       cancelCapture(): Promise<void>
       permissions(): Promise<MacPermissions | null>
