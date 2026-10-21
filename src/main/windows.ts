@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, nativeTheme, screen } from 'electron'
 import { HUB, type HubRoute } from '../shared/hub'
 import { IPC, type AnswerPayload } from '../shared/types'
 import { join } from 'node:path'
+import { platform } from './platform'
 
 const preload = join(import.meta.dirname, '../preload/index.cjs')
 const isMac = process.platform === 'darwin'
@@ -26,7 +27,7 @@ export const BAR_HEIGHT = 300
 // always visible. Clicks pass through to the app underneath
 // except over the pill or a card. It must never take focus, otherwise the
 // paste would land in the bar instead of the user's input box.
-export function createFloatingBar(): BrowserWindow {
+export function createFloatingBar(log: (line: string) => void): BrowserWindow {
   const win = new BrowserWindow({
     width: BAR_WIDTH,
     height: BAR_HEIGHT,
@@ -45,7 +46,7 @@ export function createFloatingBar(): BrowserWindow {
   win.setAlwaysOnTop(true, 'screen-saver')
   floatEverywhere(win)
   setBarInteractive(win, false)
-  watchBarPointer(win)
+  watchBarPointer(win, log)
   load(win, 'floating-bar')
   win.once('ready-to-show', () => {
     placeBar(win)
@@ -76,17 +77,30 @@ export const barTakesClicks = (): boolean => !barIgnoresMouse
 // update download did it), and from then on no card takes a click. So the pointer
 // is also checked from here: on the pill or a card, the bar takes clicks, and the
 // page gets ordinary mouse events again. Taking clicks also sets the hook up anew.
+// The window's real state is read from the system rather than trusted from our flag:
+// a bar that lets clicks through while the flag says it takes them gets no forwarded
+// moves either, and no card can be clicked or closed until a restart. (A 0.2.12 bar
+// got stuck like that or with this check failing some other way; bar.log tells.)
 const POINTER_CHECK_MS = 100
+const DESYNC_LOG_EVERY_MS = 60_000
 
-function watchBarPointer(win: BrowserWindow): void {
+function watchBarPointer(win: BrowserWindow, log: (line: string) => void): void {
+  let loggedAt = 0
   const timer = setInterval(() => {
     if (win.isDestroyed()) return clearInterval(timer)
-    if (!barIgnoresMouse || !barHitRects.length || !win.isVisible()) return
+    if (!barHitRects.length || !win.isVisible()) return
     const cursor = screen.getCursorScreenPoint()
     const { x: left, y: top } = win.getBounds()
     const x = cursor.x - left
     const y = cursor.y - top
-    if (barHitRects.some(([l, t, r, b]) => x >= l && x < r && y >= t && y < b)) setBarInteractive(win, true)
+    if (!barHitRects.some(([l, t, r, b]) => x >= l && x < r && y >= t && y < b)) return
+    const passesThrough = platform.clicksPassThrough(win.getNativeWindowHandle()) ?? barIgnoresMouse
+    if (!passesThrough) return
+    if (!barIgnoresMouse && Date.now() - loggedAt > DESYNC_LOG_EVERY_MS) {
+      loggedAt = Date.now()
+      log('bar let clicks through while set to take them, fixed')
+    }
+    setBarInteractive(win, true)
   }, POINTER_CHECK_MS)
 }
 

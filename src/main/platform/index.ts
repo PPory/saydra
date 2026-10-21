@@ -30,6 +30,9 @@ export interface Platform {
   // Clipboard formats that tell clipboard history, cloud sync and clipboard managers
   // to skip this content (see paste.ts).
   transientFormats: string[]
+  // Whether the window really lets clicks through right now, read from the system
+  // (see watchBarPointer); null where that can't be read.
+  clicksPassThrough(handle: Buffer): boolean | null
 }
 
 export const isMac = process.platform === 'darwin'

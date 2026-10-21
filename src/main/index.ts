@@ -227,6 +227,7 @@ const keepHistory = () => getHistoryRetention() !== 'never'
 function setView(next: BarView): void {
   view = next
   bar.webContents.send(IPC.setView, next)
+  if (next.kind === 'done') announceUpdateSoon()
 }
 
 function showAlert(alert: Omit<BarAlert, 'id'> & { id?: string }): void {
@@ -1208,12 +1209,27 @@ function setUpMacApp(): void {
 }
 
 // The bar says so once per run when an update is ready; the hub and the tray always show it.
+// Not the moment the download finishes, which can be in the middle of anything, but just
+// after the next dictation, when the user is looking at the bar anyway. It goes away by
+// itself: the update installs on quit even if nobody clicks.
 let updateAnnounced = ''
+const UPDATE_NOTICE_DELAY_MS = 2500
+const UPDATE_NOTICE_MS = 12_000
 function onUpdateState(s: UpdateState): void {
   getHub()?.webContents.send(HUB.updateChanged, s)
   refreshTray()
   if (s.kind === 'installing')
     return showAlert({ id: 'update', title: `正在更新到 Saydra ${s.version}`, description: '安装完会自动重新打开，请稍等片刻。' })
+  if (s.kind === 'ready' && UPDATE_SHOTS) announceUpdate()
+}
+
+function announceUpdateSoon(): void {
+  const s = getUpdateState()
+  if (s.kind === 'ready' && updateAnnounced !== s.version) setTimeout(announceUpdate, UPDATE_NOTICE_DELAY_MS)
+}
+
+function announceUpdate(): void {
+  const s = getUpdateState()
   if (s.kind !== 'ready' || updateAnnounced === s.version) return
   updateAnnounced = s.version
   showAlert({
@@ -1223,7 +1239,8 @@ function onUpdateState(s: UpdateState): void {
     actions: [
       { label: '更新了什么', action: 'show-update' },
       { label: '重启更新', action: 'install-update', primary: true }
-    ]
+    ],
+    autoHideMs: UPDATE_NOTICE_MS
   })
   if (UPDATE_SHOTS) void shootUpdate(UPDATE_SHOTS, 'update')
 }
@@ -1352,14 +1369,26 @@ async function runAlertShots(dir: string): Promise<void> {
   const btn = await bar.webContents.executeJavaScript(
     `(() => { const r = document.querySelector('.alert .btn.primary').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()`
   )
-  const takesBefore = barTakesClicks()
   // Follows the pointer, in case the person at the computer is moving it.
-  for (let i = 0; i < 20 && !barTakesClicks(); i++) {
-    const cursor = screen.getCursorScreenPoint()
-    bar.setPosition(Math.round(cursor.x - btn[0]), Math.round(cursor.y - btn[1]))
-    await wait(50)
+  const barUnderPointer = async (done: () => boolean) => {
+    for (let i = 0; i < 20 && !done(); i++) {
+      const cursor = screen.getCursorScreenPoint()
+      bar.setPosition(Math.round(cursor.x - btn[0]), Math.round(cursor.y - btn[1]))
+      await wait(50)
+    }
   }
+  const takesBefore = barTakesClicks()
+  await barUnderPointer(barTakesClicks)
   console.log(`  pointer on a card without forwarded moves: takes clicks ${takesBefore} -> ${barTakesClicks()}`)
+  // The window lets clicks through while our flag says it takes them: then nothing
+  // forwards moves and only reading the window's real state sets it right.
+  const passesThrough = () => platform.clicksPassThrough(bar.getNativeWindowHandle())
+  bar.setPosition(0, 0)
+  setBarInteractive(bar, true)
+  bar.setIgnoreMouseEvents(true)
+  const throughBefore = passesThrough()
+  await barUnderPointer(() => passesThrough() === false)
+  console.log(`  pointer on a card, bar out of sync with its flag: lets clicks through ${throughBefore} -> ${passesThrough()}`)
   app.exit(0)
 }
 
@@ -1447,7 +1476,7 @@ app.whenReady().then(() => {
   // Load the local model in the background so the first dictation does not wait.
   if (getAsrEngine() === 'local')
     void preloadLocalAsr(modelsRoot()).catch((err) => console.warn('local ASR unavailable', err))
-  bar = createFloatingBar()
+  bar = createFloatingBar(logBar)
   app.on('child-process-gone', (_e, d) => d.type === 'GPU' && logBar(`gpu process gone: ${d.reason}`))
   wireIpc()
   createTray()

@@ -18,6 +18,10 @@ function ctrlTap(key: 'C' | 'V'): void {
   uIOhook.keyTap(UiohookKey[key], [UiohookKey.Ctrl])
 }
 
+const GWL_EXSTYLE = -20
+const WS_EX_TRANSPARENT = 0x20 // what setIgnoreMouseEvents(true) sets
+let getWindowLong: ((hwnd: number, index: number) => number | bigint) | undefined
+
 export const win: Platform = {
   startKeyboardHook,
   pressCopy: () => ctrlTap('C'),
@@ -31,5 +35,10 @@ export const win: Platform = {
     return { appName: basename(w.owner.path || w.owner.name || ''), title: w.title }
   },
   // Win+V history, cloud clipboard and tools like Ditto all honour these.
-  transientFormats: ['ExcludeClipboardContentFromMonitorProcessing', 'CanIncludeInClipboardHistory', 'CanUploadToCloudClipboard']
+  transientFormats: ['ExcludeClipboardContentFromMonitorProcessing', 'CanIncludeInClipboardHistory', 'CanUploadToCloudClipboard'],
+  clicksPassThrough(handle) {
+    getWindowLong ??= require('koffi').load('user32.dll').func('intptr_t __stdcall GetWindowLongPtrW(intptr_t hWnd, int nIndex)')
+    const exStyle = Number(getWindowLong!(Number(handle.readBigUInt64LE(0)), GWL_EXSTYLE))
+    return (exStyle & WS_EX_TRANSPARENT) !== 0
+  }
 }
