@@ -1737,3 +1737,17 @@ input[type='checkbox'] {
   text-align: center;
   font-size: 14px;
 }
+.welcome .field.select {
+  width: 100%;
+}
+.welcome-service {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-3);
+}
+.welcome-service span {
+  flex: 1;
+}

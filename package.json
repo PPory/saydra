@@ -1,7 +1,7 @@
 {
   "name": "rea-typeless",
   "productName": "Saydra",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Saydra: hold-to-talk voice dictation for Windows and macOS, powered by your own model API key",
   "private": true,
   "type": "module",
@@ -27,6 +27,7 @@
     "test:tidy": "tsx scripts/test-tidy.ts",
     "test:diag": "tsx scripts/test-diag.ts",
     "test:mac-keys": "tsx scripts/test-mac-keys.ts",
+    "test:services": "tsx scripts/test-services.ts",
     "build:mac-helper": "mkdir -p output/mac-helper && swiftc -O -target arm64-apple-macos12 src/main/helpers/mac-helper.swift -o output/mac-helper/mac-helper",
     "dist:mac": "npm run build:mac-helper && electron-vite build && electron-builder --mac --arm64 --config electron-builder.yml --publish never"
   },

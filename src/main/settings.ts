@@ -169,6 +169,8 @@ export function getPublicSettings(): PublicSettings {
 export function saveSettings(input: SettingsInput): void {
   if (input.apiKey?.trim()) store().set('encryptedApiKey', encrypt(input.apiKey.trim()))
   if (input.customApiKey?.trim()) store().set('encryptedCustomKey', encrypt(input.customApiKey.trim()))
+  // '' clears it: another service was picked, and this key is no use there.
+  else if (input.customApiKey === '') store().set('encryptedCustomKey', '')
   if (input.siliconflowKey?.trim()) store().set('encryptedSiliconflowKey', encrypt(input.siliconflowKey.trim()))
   if (input.customBaseUrl !== undefined) store().set('customBaseUrl', input.customBaseUrl.trim().replace(/\/$/, ''))
   if (input.customModel !== undefined) store().set('customModel', input.customModel.trim())

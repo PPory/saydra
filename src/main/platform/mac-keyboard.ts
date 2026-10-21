@@ -23,7 +23,6 @@ const FIELD_USER_DATA = 42 // kCGEventSourceUserData
 const FLAG_COMMAND = 0x100000
 // Marks the ⌘C / ⌘V we post, so the tap passes them on untouched (LLKHF_INJECTED on Windows).
 const OUR_EVENT = 0x534459
-const UTF8 = 0x08000100
 
 type Native = ReturnType<typeof loadNative>
 let native: Native | null = null
@@ -33,10 +32,11 @@ function loadNative() {
   const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
   const cf = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
   const TapCallback = koffi.proto('void *CGEventTapCallBack(void *proxy, uint32_t type, void *event, void *refcon)')
-  const CFStringCreateWithCString = cf.func('void *CFStringCreateWithCString(void *alloc, str s, uint32_t encoding)')
+  const TimerCallback = koffi.proto('void CFRunLoopTimerCallBack(void *timer, void *info)')
   return {
     koffi,
     TapCallback,
+    TimerCallback,
     CGEventTapCreate: cg.func(
       'void *CGEventTapCreate(uint32_t tap, uint32_t place, uint32_t options, uint64_t mask, CGEventTapCallBack *callback, void *refcon)'
     ),
@@ -55,8 +55,16 @@ function loadNative() {
     CFRunLoopAddSource: cf.func('void CFRunLoopAddSource(void *loop, void *source, void *mode)'),
     CFRunLoopRemoveSource: cf.func('void CFRunLoopRemoveSource(void *loop, void *source, void *mode)'),
     CFRelease: cf.func('void CFRelease(void *ref)'),
-    // kCFRunLoopCommonModes is a global; a string with the same contents is equal to it.
-    commonModes: CFStringCreateWithCString(null, 'kCFRunLoopCommonModes', UTF8)
+    CFAbsoluteTimeGetCurrent: cf.func('double CFAbsoluteTimeGetCurrent()'),
+    CFRunLoopTimerCreate: cf.func(
+      'void *CFRunLoopTimerCreate(void *alloc, double fireDate, double interval, uint64_t flags, long order, CFRunLoopTimerCallBack *callout, void *context)'
+    ),
+    CFRunLoopAddTimer: cf.func('void CFRunLoopAddTimer(void *loop, void *timer, void *mode)'),
+    CFRunLoopTimerInvalidate: cf.func('void CFRunLoopTimerInvalidate(void *timer)'),
+    // The global itself, not a string with the same contents: CFRunLoopAddSource tells
+    // the common modes apart by pointer, and any other string becomes a mode of its
+    // own that the run loop never runs (the tap was created but never called).
+    commonModes: koffi.decode(cf.symbol('kCFRunLoopCommonModes'), 'void *')
   }
 }
 
@@ -128,6 +136,31 @@ export function pressCommand(keycode: number): void {
     n.CGEventPost(HID_TAP, ev)
     n.CFRelease(ev)
   }
+}
+
+// Self-test: a timer on the main run loop in the mode the tap's source is added to.
+// It needs no permission, so the build machine can show the tap would be called.
+export function probeRunLoop(waitMs = 1000): Promise<boolean> {
+  const n = lib()
+  return new Promise((resolve) => {
+    let timer: unknown = null
+    let settled = false
+    const finish = (fired: boolean) => {
+      if (settled) return
+      settled = true
+      resolve(fired)
+      // Not from inside the callback that is still running.
+      setImmediate(() => {
+        n.CFRunLoopTimerInvalidate(timer)
+        n.CFRelease(timer)
+        n.koffi.unregister(callback)
+      })
+    }
+    const callback = n.koffi.register(() => finish(true), n.koffi.pointer(n.TimerCallback))
+    timer = n.CFRunLoopTimerCreate(null, n.CFAbsoluteTimeGetCurrent() + 0.05, 0, 0, 0, callback, null)
+    n.CFRunLoopAddTimer(n.CFRunLoopGetMain(), timer, n.commonModes)
+    setTimeout(() => finish(false), waitMs)
+  })
 }
 
 // Input Monitoring: some macOS versions ask for it separately before a key tap sees keys.

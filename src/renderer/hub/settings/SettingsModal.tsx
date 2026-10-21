@@ -5,7 +5,8 @@ import { IS_MAC, type Shortcut, type ShortcutBindings } from '../../../shared/ke
 import type { AsrEngine, PublicSettings, RefineProvider } from '../../../shared/types'
 import { Button, Icon, IconButton, Segmented, Switch, type IconName } from '../ui'
 import { MicModal, Row, Section, ShortcutInput, TranslationLanguages } from './Controls'
-import { GROQ_KEYS_URL, KeyField, ModelPicker, TryRefine, useModelList, useSettingsState, type Save } from './ModelService'
+import { GROQ_KEYS_URL, KeyField, ModelPicker, ServiceSelect, TryRefine, useCustomService, useSettingsState, type Save } from './ModelService'
+import { serviceOf } from '../../../shared/ai-services'
 
 export type SettingsPage = 'settings' | 'models' | 'about'
 
@@ -136,14 +137,7 @@ function RefineNotes({ value, save }: { value: string; save: Save }) {
 }
 
 function ModelsPage({ s, save }: { s: PublicSettings; save: Save }) {
-  const [url, setUrl] = useState(s.customBaseUrl)
-  useEffect(() => setUrl(s.customBaseUrl), [s.customBaseUrl])
-  const [models, setModels] = useModelList(s.customBaseUrl, s.hasCustomKey)
-  // Only one model on offer and none chosen yet: take it.
-  useEffect(() => {
-    if (!s.customModel && models.length === 1) void save({ customModel: models[0] }, '已选择模型')
-  }, [models, s.customModel])
-  const customReady = Boolean(s.customBaseUrl && s.hasCustomKey && s.customModel)
+  const custom = useCustomService(s, save)
 
   return (
     <div class="set-page">
@@ -163,7 +157,7 @@ function ModelsPage({ s, save }: { s: PublicSettings; save: Save }) {
             onChange={(e) => save({ refineProvider: e.currentTarget.value as RefineProvider })}
           >
             <option value="groq">Groq（免费，最快）</option>
-            <option value="custom">自定义服务</option>
+            <option value="custom">{serviceOf(s.customBaseUrl)?.name ?? '其他 AI 服务'}</option>
           </select>
         </Row>
         <RefineNotes value={s.refineNotes} save={save} />
@@ -223,36 +217,54 @@ function ModelsPage({ s, save }: { s: PublicSettings; save: Save }) {
           <TryRefine provider="groq" disabled={!s.hasApiKey} />
         </Row>
       </Section>
-      <Section icon="model" title="自定义服务（OpenAI 兼容）">
-        <Row title="服务地址" description="DeepSeek、通义千问、Kimi 等服务文档里的 OpenAI 兼容地址，一般以 /v1 结尾。" top>
-          <input
-            class="field wide"
-            type="url"
-            spellcheck={false}
-            value={url}
-            placeholder="https://…/v1"
-            onInput={(e) => setUrl(e.currentTarget.value)}
-            onBlur={() => url !== s.customBaseUrl && save({ customBaseUrl: url }, '服务地址已保存')}
-          />
+      <Section icon="model" title="其他 AI 服务">
+        <Row title="服务商" description="换服务商后要重新填 API key。">
+          <ServiceSelect value={custom.id} onChange={custom.choose} />
         </Row>
-        <Row title="API key" top>
+        {!custom.service && (
+          <Row title="接口地址" description="服务商文档里的 OpenAI 兼容地址，一般以 /v1 结尾。" top>
+            <input
+              class="field wide"
+              type="url"
+              spellcheck={false}
+              value={custom.url}
+              placeholder="https://…/v1"
+              onInput={(e) => custom.setUrl(e.currentTarget.value)}
+              onBlur={custom.saveUrl}
+            />
+          </Row>
+        )}
+        <Row
+          title="API key"
+          description={
+            custom.service && (
+              <>
+                在 {custom.service.name} 官网创建。
+                <a class="link" onClick={() => void window.rea.openExternal(custom.service!.keysUrl)}>
+                  去申请 key
+                </a>
+              </>
+            )
+          }
+          top
+        >
           <KeyField
-            placeholder="API key"
+            placeholder="粘贴你的 API key"
             source={s.customKeySource}
             saved={s.hasCustomKey}
             test={async (k) => {
-              const res = await window.rea.testCustom(url, k)
-              if (res.models) setModels(res.models)
+              const res = await window.rea.testCustom(custom.baseUrl, k)
+              if (res.models) custom.setModels(res.models)
               return res
             }}
-            onSaved={(k) => save({ customApiKey: k, customBaseUrl: url })}
+            onSaved={(k) => save({ customApiKey: k, customBaseUrl: custom.baseUrl })}
           />
         </Row>
-        <Row title="润色模型" description="选一个对话模型即可。名字带 reasoner、thinking 的推理模型会明显变慢。" top>
-          <ModelPicker value={s.customModel} models={models} onChange={(m) => save({ customModel: m }, m ? '模型已保存' : undefined)} />
+        <Row title="润色模型" description="填好 key 后会自动选好。名字带 reasoner、thinking 的推理模型会明显变慢。" top>
+          <ModelPicker value={s.customModel} models={custom.models} onChange={(m) => save({ customModel: m }, m ? '模型已保存' : undefined)} />
         </Row>
         <Row title="试一下" description="用一句口语实际整理一次，看看效果和速度。" top>
-          <TryRefine provider="custom" disabled={!customReady} />
+          <TryRefine provider="custom" disabled={!custom.ready} />
         </Row>
       </Section>
       <Section icon="folder" title="数据">

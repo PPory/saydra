@@ -1,6 +1,7 @@
 // Model service building blocks shared by 设置 → 模型服务 and the first-run guide:
-// settings state, key field, model picker and the 「试一下」 check.
+// settings state, service picker, key field, model picker and the 「试一下」 check.
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { AI_SERVICES, OTHER_SERVICE, pickModel, serviceOf, type AiService } from '../../../shared/ai-services'
 import {
   TRY_REFINE_SAMPLE,
   type KeySource,
@@ -35,9 +36,11 @@ export function useSettingsState(): [PublicSettings | null, Save] {
 
 // The custom service's model names, fetched with the saved key whenever the
 // address is known, so the picker is filled without pressing 「测试」 first.
-export function useModelList(baseUrl: string, hasKey: boolean): [string[], (m: string[]) => void] {
-  const [models, setModels] = useState<string[]>([])
+// null until known; [] when the service offers no list.
+function useModelList(baseUrl: string, hasKey: boolean): [string[] | null, (m: string[] | null) => void] {
+  const [models, setModels] = useState<string[] | null>(null)
   useEffect(() => {
+    setModels(null)
     if (!baseUrl || !hasKey) return
     let live = true
     void window.rea.testCustom(baseUrl).then((r) => live && r.ok && r.models && setModels(r.models))
@@ -46,6 +49,63 @@ export function useModelList(baseUrl: string, hasKey: boolean): [string[], (m: s
     }
   }, [baseUrl, hasKey])
   return [models, setModels]
+}
+
+// The OpenAI-compatible service: one picked from the list (its address and where to
+// get a key are known), or 「其他」 with an address typed in. Once the key is saved,
+// a fitting model is chosen by itself; `onModelPicked` runs after that.
+export function useCustomService(s: PublicSettings | null, save: Save, onModelPicked?: () => void) {
+  const savedUrl = s?.customBaseUrl ?? ''
+  const [id, setId] = useState('')
+  const [url, setUrl] = useState('') // typed address, for 「其他」
+  useEffect(() => {
+    if (savedUrl) {
+      setId(serviceOf(savedUrl)?.id ?? OTHER_SERVICE)
+      setUrl(savedUrl)
+    } else if (!id && s) setId(AI_SERVICES[0].id)
+  }, [savedUrl, Boolean(s)])
+  const service: AiService | null = AI_SERVICES.find((x) => x.id === id) ?? null
+  const [models, setModels] = useModelList(savedUrl, Boolean(s?.hasCustomKey))
+
+  useEffect(() => {
+    if (!s || s.customModel || !s.hasCustomKey || !models) return
+    const m = pickModel(serviceOf(savedUrl), models)
+    if (m) void save({ customModel: m }).then(onModelPicked)
+  }, [models, s?.customModel, s?.hasCustomKey])
+
+  // Another service: the saved key and model belong to the old one.
+  const choose = (next: string) => {
+    setId(next)
+    if (!savedUrl && !s?.hasCustomKey) return
+    setUrl('')
+    setModels(null)
+    void save({ customBaseUrl: AI_SERVICES.find((x) => x.id === next)?.baseUrl ?? '', customApiKey: '', customModel: '' })
+  }
+
+  return {
+    id,
+    service,
+    choose,
+    // The address to test and save with the key.
+    baseUrl: service ? service.baseUrl : url.trim(),
+    url,
+    setUrl,
+    saveUrl: () => url.trim() !== savedUrl && save({ customBaseUrl: url }, '服务地址已保存'),
+    models: models ?? [],
+    setModels,
+    ready: Boolean(s?.customBaseUrl && s.hasCustomKey && s.customModel)
+  }
+}
+
+export function ServiceSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  return (
+    <select class="field select" value={value} onChange={(e) => onChange(e.currentTarget.value)}>
+      {AI_SERVICES.map((x) => (
+        <option value={x.id}>{x.label}</option>
+      ))}
+      <option value={OTHER_SERVICE}>其他（手动填写接口地址）</option>
+    </select>
+  )
 }
 
 const sourceLabel = (src: KeySource) => (src === 'settings' ? '已保存' : src === 'env' ? '来自环境变量' : '未设置')

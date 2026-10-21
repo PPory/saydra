@@ -5,7 +5,7 @@ import { useState } from 'preact/hooks'
 import { IS_MAC } from '../../shared/keys'
 import type { RefineProvider } from '../../shared/types'
 import { essentialsGranted, PermissionList, usePermissions } from './Permissions'
-import { GROQ_KEYS_URL, KeyField, ModelPicker, TryRefine, useModelList, useSettingsState } from './settings/ModelService'
+import { GROQ_KEYS_URL, KeyField, ModelPicker, ServiceSelect, TryRefine, useCustomService, useSettingsState } from './settings/ModelService'
 import { Button, KeyCaps, Modal } from './ui'
 
 type Step = 'permissions' | 'choose' | 'connect' | 'try'
@@ -15,21 +15,19 @@ export function Welcome({ onClose }: { onClose: () => void }) {
   const [s, save] = useSettingsState()
   const [step, setStep] = useState<Step>(STEPS[0])
   const [choice, setChoice] = useState<RefineProvider>('groq')
-  const [url, setUrl] = useState('')
   // Bumped after a key or model is saved, so 「试一下」 runs on its own.
   const [savedTick, setSavedTick] = useState(0)
-  const [models, setModels] = useModelList(s?.customBaseUrl ?? '', Boolean(s?.hasCustomKey))
+  const saved = () => setSavedTick((t) => t + 1)
+  const custom = useCustomService(s, save, saved)
   const perms = usePermissions()
   if (!s) return null
 
-  const ready = choice === 'groq' ? s.hasApiKey : Boolean(s.customBaseUrl && s.hasCustomKey && s.customModel)
+  const ready = choice === 'groq' ? s.hasApiKey : custom.ready
   const pick = (p: RefineProvider) => {
     setChoice(p)
-    setUrl(s.customBaseUrl)
     void save({ refineProvider: p })
     setStep('connect')
   }
-  const saved = () => setSavedTick((t) => t + 1)
 
   const title = {
     permissions: '欢迎使用 Saydra',
@@ -99,7 +97,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
             </button>
             <button type="button" class="welcome-choice" onClick={() => pick('custom')}>
               <span class="wc-title">其他 AI 服务</span>
-              <span class="wc-desc">DeepSeek、通义千问、Kimi 等任何兼容 OpenAI 接口的服务，用你自己的 API key。</span>
+              <span class="wc-desc">DeepSeek、通义千问、Kimi、OpenAI 等，选好服务商，粘贴你自己的 API key 就行。</span>
             </button>
           </div>
         </>
@@ -127,28 +125,41 @@ export function Welcome({ onClose }: { onClose: () => void }) {
 
       {step === 'connect' && choice === 'custom' && (
         <>
-          <p class="modal-desc">在服务商的文档里找到 OpenAI 兼容的接口地址（一般以 /v1 结尾），再创建一个 API key。</p>
-          <label class="welcome-label">服务地址</label>
-          <input
-            class="field"
-            type="url"
-            spellcheck={false}
-            value={url}
-            placeholder="https://…/v1"
-            onInput={(e) => setUrl(e.currentTarget.value)}
-            onBlur={() => url !== s.customBaseUrl && save({ customBaseUrl: url })}
-          />
+          <label class="welcome-label">服务商</label>
+          <ServiceSelect value={custom.id} onChange={custom.choose} />
+          {custom.service ? (
+            <div class="welcome-service">
+              <span>在 {custom.service.name} 官网创建一个 API key，复制后粘贴到下面。</span>
+              <Button variant="outline" onClick={() => void window.rea.openExternal(custom.service!.keysUrl)}>
+                去申请 key
+              </Button>
+            </div>
+          ) : (
+            <>
+              <label class="welcome-label">接口地址</label>
+              <input
+                class="field"
+                type="url"
+                spellcheck={false}
+                value={custom.url}
+                placeholder="https://…/v1"
+                onInput={(e) => custom.setUrl(e.currentTarget.value)}
+                onBlur={custom.saveUrl}
+              />
+              <p class="welcome-hint">服务商文档里的 OpenAI 兼容地址，一般以 /v1 结尾。</p>
+            </>
+          )}
           <label class="welcome-label">API key</label>
           <KeyField
             placeholder="粘贴你的 API key"
             source={s.customKeySource}
             saved={s.hasCustomKey}
             test={async (k) => {
-              const res = await window.rea.testCustom(url, k)
-              if (res.models) setModels(res.models)
+              const res = await window.rea.testCustom(custom.baseUrl, k)
+              if (res.models) custom.setModels(res.models)
               return res
             }}
-            onSaved={(k) => save({ customApiKey: k, customBaseUrl: url, refineProvider: 'custom' })}
+            onSaved={(k) => save({ customApiKey: k, customBaseUrl: custom.baseUrl, refineProvider: 'custom' })}
           />
           {s.hasCustomKey && (
             <>
@@ -156,10 +167,12 @@ export function Welcome({ onClose }: { onClose: () => void }) {
               <ModelPicker
                 wide
                 value={s.customModel}
-                models={models}
+                models={custom.models}
                 onChange={(m) => save({ customModel: m }).then(saved)}
               />
-              <p class="welcome-hint">选一个对话模型即可。名字带 reasoner、thinking 的推理模型会明显变慢。</p>
+              <p class="welcome-hint">
+                {s.customModel ? '已经选好，一般不用改。' : '选一个对话模型即可。'}名字带 reasoner、thinking 的推理模型会明显变慢。
+              </p>
             </>
           )}
           <TryRefine provider="custom" disabled={!ready} auto={savedTick} />

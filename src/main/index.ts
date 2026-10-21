@@ -111,6 +111,7 @@ import {
 } from './windows'
 import { isMac, platform } from './platform'
 import { grantMacPermission, macPermissions } from './platform/mac'
+import { probeRunLoop } from './platform/mac-keyboard'
 import { focusInfo, isMuted, setMuted, startHelper, type FocusInfo } from './platform/helper'
 
 // The app was called REATypeless before: an existing install keeps its data
@@ -394,7 +395,7 @@ async function refineDictation(job: Job, { raw, engine, heard }: Recognized): Pr
 
 // For perf.log: which services failed and how, never the message.
 const failures = (errs: unknown[]): string =>
-  errs.map((e) => (e instanceof ApiError ? `${e.provider || 'service'}:${e.kind}` : 'other')).join(',')
+  errs.map((e) => (e instanceof ApiError ? `${(e.provider || 'service').replace(/\s+/g, '')}:${e.kind}` : 'other')).join(',')
 
 // 翻译: the transcript in the language picked on the bar. Pasting the
 // untranslated words would be wrong, so a failure shows the retry card instead.
@@ -1475,6 +1476,7 @@ app.whenReady().then(() => {
       if (isMac) {
         console.log(`  mac permissions: ${JSON.stringify(await macPermissions(usesFn(), false))}`)
         console.log(`  mac front app: ${JSON.stringify(await platform.frontApp())}`)
+        console.log(`  mac key tap run loop: ${(await probeRunLoop()) ? 'ok' : 'not serviced'}`)
       }
       const m = (process.env.REA_SELFTEST_MODE as DictationMode) || 'dictate'
       keyHandlers.onStart(m)

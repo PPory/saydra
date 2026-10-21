@@ -115,7 +115,7 @@ export interface SettingsInput {
   siliconflowKey?: string
   refineProvider?: RefineProvider
   customBaseUrl?: string
-  customApiKey?: string
+  customApiKey?: string // '' clears the saved key
   customModel?: string
   refineNotes?: string
   shortcuts?: ShortcutBindings

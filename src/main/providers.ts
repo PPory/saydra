@@ -13,13 +13,17 @@ import {
   getRefineProvider,
   getSiliconflowKey
 } from './settings'
+import { serviceOf } from '../shared/ai-services'
 import type { RefineProvider } from '../shared/types'
 
 export function customEndpoint(baseUrl = getCustomBaseUrl(), apiKey = getCustomKey()): Endpoint | null {
   if (!baseUrl || !apiKey) return null
-  let name = '自定义服务'
+  const known = serviceOf(baseUrl)
+  // A known service is always reached over https, even if its address was typed with http://.
+  if (known) baseUrl = baseUrl.replace(/^http:/i, 'https:')
+  let name = known?.name ?? '自定义服务'
   try {
-    name = new URL(baseUrl).hostname
+    if (!known) name = new URL(baseUrl).hostname
   } catch {}
   return { name, baseUrl, apiKey }
 }
