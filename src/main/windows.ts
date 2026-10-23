@@ -40,11 +40,16 @@ export function createFloatingBar(log: (line: string) => void): BrowserWindow {
     skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: false,
-    ...(isMac && { type: 'panel' }),
+    ...(isMac && { type: 'panel', acceptFirstMouse: true }),
     webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false }
   })
   win.setAlwaysOnTop(true, 'screen-saver')
   floatEverywhere(win)
+  try {
+    platform.clickWithoutFocus(win.getNativeWindowHandle())
+  } catch (err) {
+    log(`first click fix not installed: ${err instanceof Error ? err.message : err}`)
+  }
   setBarInteractive(win, false)
   watchBarPointer(win, log)
   load(win, 'floating-bar')
@@ -81,6 +86,9 @@ export const barTakesClicks = (): boolean => !barIgnoresMouse
 // a bar that lets clicks through while the flag says it takes them gets no forwarded
 // moves either, and no card can be clicked or closed until a restart. (A 0.2.12 bar
 // got stuck like that or with this check failing some other way; bar.log tells.)
+// It also hands clicks back when the pill or card goes away under a pointer that
+// doesn't move: the page gets no mouseleave then, and the bar would keep taking the
+// clicks meant for the app underneath.
 const POINTER_CHECK_MS = 100
 const DESYNC_LOG_EVERY_MS = 60_000
 
@@ -88,12 +96,15 @@ function watchBarPointer(win: BrowserWindow, log: (line: string) => void): void 
   let loggedAt = 0
   const timer = setInterval(() => {
     if (win.isDestroyed()) return clearInterval(timer)
-    if (!barHitRects.length || !win.isVisible()) return
+    if (!win.isVisible()) return
     const cursor = screen.getCursorScreenPoint()
     const { x: left, y: top } = win.getBounds()
     const x = cursor.x - left
     const y = cursor.y - top
-    if (!barHitRects.some(([l, t, r, b]) => x >= l && x < r && y >= t && y < b)) return
+    if (!barHitRects.some(([l, t, r, b]) => x >= l && x < r && y >= t && y < b)) {
+      if (!barIgnoresMouse) setBarInteractive(win, false)
+      return
+    }
     const passesThrough = platform.clicksPassThrough(win.getNativeWindowHandle()) ?? barIgnoresMouse
     if (!passesThrough) return
     if (!barIgnoresMouse && Date.now() - loggedAt > DESYNC_LOG_EVERY_MS) {

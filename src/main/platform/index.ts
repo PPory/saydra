@@ -33,6 +33,9 @@ export interface Platform {
   // Whether the window really lets clicks through right now, read from the system
   // (see watchBarPointer); null where that can't be read.
   clicksPassThrough(handle: Buffer): boolean | null
+  // A window that never takes focus still gets the first click on it, instead of
+  // the system using that click only to (not) activate it. See win.ts.
+  clickWithoutFocus(handle: Buffer): void
 }
 
 export const isMac = process.platform === 'darwin'
