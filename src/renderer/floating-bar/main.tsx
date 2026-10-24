@@ -1,15 +1,19 @@
 // Floating bar: the pill plus alert cards above it.
 import { render } from 'preact'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { languageName, MAX_TRANSLATE_LANGUAGES } from '../../shared/languages'
 import { COUNTDOWN_MS, MAX_RECORD_MS, type BarAlert, type BarView, type TranslateTarget } from '../../shared/types'
 import { joinLive, revealStep, type LiveText } from '../../shared/live-text'
 import { createRecorder, decodePcm, type MicStatus } from './recorder'
 import { playStart, playStop } from './sounds'
 import { createWaveform } from './waveform'
+import { createWavePainter, type WavePainter } from './wave-canvas'
 import './bar.css'
 
 const BAR_COUNT = 10 // 38px wide: 2px bars, 2px gaps
+const WAVE_W = 38
+const WAVE_H = 24
+const WAVE_OUT_MS = 150 // the waveform folds away while 「Thinking」 comes in
 const HOVER_DELAY_MS = 250
 const DONE_FADE_MS = 350
 const REVEAL_MS = 400 // new words in the live caption type out over this long
@@ -46,6 +50,38 @@ function Tooltip({ text, keyLabel, show }: { text: string; keyLabel?: string; sh
       <span>{text}</span>
       {keyLabel && <kbd>{keyLabel}</kbd>}
     </div>
+  )
+}
+
+// 「Thinking」 with a soft light passing over it. The sweep runs at 8px/s per
+// letter with a highlight 3px per letter wide, then rests 300 ms, so short and
+// long labels pass at the same pace.
+function Shimmer({ text }: { text: string }) {
+  const light = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const el = light.current
+    if (!el) return
+    const width = text.length * 3
+    const sweep = ((el.offsetWidth + width) / (text.length * 8)) * 1000
+    const duration = sweep + 300
+    el.style.setProperty('--sw', `${width}px`)
+    const anim = el.animate(
+      [
+        { backgroundPosition: '150% 0', easing: 'ease-out' },
+        { backgroundPosition: '-50% 0', offset: sweep / duration },
+        { backgroundPosition: '-50% 0' }
+      ],
+      { duration, iterations: Infinity }
+    )
+    return () => anim.cancel()
+  }, [text])
+  return (
+    <span class="shimmer">
+      {text}
+      <span ref={light} class="shimmer-light" aria-hidden="true">
+        {text}
+      </span>
+    </span>
   )
 }
 
@@ -272,7 +308,6 @@ function watchHitRects(): () => void {
 function App() {
   const [view, setView] = useState<BarView>({ kind: 'idle' })
   const [mic, setMic] = useState<MicStatus>('off')
-  const [heights, setHeights] = useState<number[]>(() => Array(BAR_COUNT).fill(2))
   const [alerts, setAlerts] = useState<BarAlert[]>([])
   const [alertsHover, setAlertsHover] = useState(false)
   const [alertRound, setAlertRound] = useState(0) // bumps on pointer leave: countdowns restart
@@ -286,7 +321,21 @@ function App() {
   const [liveText, setLiveText] = useState<LiveText | null>(null)
   const soundsOn = useRef(true)
 
-  const wave = useMemo(() => createWaveform(BAR_COUNT, setHeights), [])
+  const painter = useRef<WavePainter | null>(null)
+  const heights = useRef<number[]>([])
+  const waveCanvas = useCallback((el: HTMLCanvasElement | null) => {
+    painter.current?.dispose()
+    painter.current = el && createWavePainter(el, BAR_COUNT, WAVE_W, WAVE_H, 2)
+    painter.current?.set(heights.current)
+  }, [])
+  const wave = useMemo(
+    () =>
+      createWaveform(BAR_COUNT, (h) => {
+        heights.current = h
+        painter.current?.set(h)
+      }),
+    []
+  )
   const recorder = useMemo(
     () =>
       createRecorder((status, analyser) => {
@@ -408,6 +457,20 @@ function App() {
   const mode = view.kind === 'recording' || view.kind === 'processing' ? view.mode : 'dictate'
   const translate = view.kind === 'recording' || view.kind === 'processing' ? view.translate : undefined
   const showWave = status === 'recording' || status === 'hands-free'
+  // Recording → Thinking: the waveform stays a moment, out of the layout, folding
+  // away. Decided while rendering, so the canvas is never dropped in between.
+  const [waveGone, setWaveGone] = useState(false)
+  const recorded = useRef(false)
+  if (showWave) recorded.current = true
+  else if (status !== 'refining') recorded.current = false
+  const waveLeaving = !showWave && recorded.current && !waveGone
+  useEffect(() => {
+    setWaveGone(false)
+    if (status !== 'refining' || !recorded.current) return
+    painter.current?.fade()
+    const id = setTimeout(() => setWaveGone(true), WAVE_OUT_MS)
+    return () => clearTimeout(id)
+  }, [status])
   const handsFree = status === 'hands-free'
 
   const enter = () => {
@@ -467,6 +530,11 @@ function App() {
             </div>
           )}
           {(status === 'hover' || status === 'error') && <Dots />}
+          {status === 'refining' && (
+            <div class="progress">
+              <i style={{ width: `${progress}%` }} />
+            </div>
+          )}
           {(showWave || status === 'refining') && (
             <div class="row">
               <span class="btn-wrap">
@@ -485,24 +553,13 @@ function App() {
                   <CloseIcon />
                 </button>
               </span>
-              {showWave && (
-                <div class="wave">
-                  {heights.map((h, i) => (
-                    <i key={i} style={{ height: `${h}px` }} />
-                  ))}
+              {(showWave || waveLeaving) && (
+                <div class="wave" data-leaving={showWave ? undefined : ''}>
+                  <canvas ref={waveCanvas} />
                 </div>
               )}
               <span class="countdown">{countdown}</span>
-              {status === 'refining' && (
-                <>
-                  <div class="progress">
-                    <i style={{ width: `${progress}%` }} />
-                  </div>
-                  <span class="shimmer" data-text="Thinking">
-                    Thinking
-                  </span>
-                </>
-              )}
+              {status === 'refining' && <Shimmer text="Thinking" />}
               <span class="btn-wrap">
                 <Tooltip
                   text="完成"

@@ -60,8 +60,11 @@ body,
   box-shadow:
     0 2px 4px 0 rgba(0, 0, 0, 0.25),
     var(--pill-shadow);
-  transition: all 0.2s var(--ease);
-  will-change: opacity, transform, background-color, width, height;
+  /* Only what changes between states. No will-change: a composited layer is scaled
+     as a bitmap while the pill resizes, which blurs its edges at 125% and 150%. */
+  transition-property: width, height, padding, opacity, background-color, border-width, border-color, box-shadow, transform;
+  transition-duration: 0.2s;
+  transition-timing-function: var(--ease);
   transform-origin: center;
   cursor: default;
 }
@@ -173,7 +176,7 @@ body,
   background: #808080;
 }
 
-/* waveform */
+/* waveform: drawn by wave-canvas.ts in device pixels */
 .wave {
   width: 38px;
   height: 24px;
@@ -181,21 +184,18 @@ body,
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
-  overflow: hidden;
+  justify-content: center;
 }
-.wave i {
-  width: 2px;
-  min-height: 2px;
+.wave canvas {
+  display: block;
   flex-shrink: 0;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.5);
-  transition:
-    width 0.08s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.2s ease;
 }
-.pill[data-live] .wave i {
-  background: #fff;
+/* folding away while 「Thinking」 comes in: out of the layout, centred on the pill */
+.wave[data-leaving] {
+  position: absolute;
+  left: 50%;
+  margin: 0;
+  transform: translateX(-50%);
 }
 
 .countdown {
@@ -270,11 +270,12 @@ body,
   background: rgba(227, 226, 226, 1);
 }
 
-/* refining */
+/* refining: the fill sits on the pill itself (not on the row inside its padding),
+   so it reaches the border at any display scale */
 .progress {
   position: absolute;
-  inset: -4px;
-  border-radius: 16px;
+  inset: 0;
+  border-radius: inherit;
   overflow: hidden;
   pointer-events: none;
 }
@@ -304,26 +305,28 @@ body,
   line-height: 16px;
   font-weight: 450;
   color: rgba(242, 241, 240, 0.5);
+  animation: shimmer-in 0.2s var(--ease) both;
 }
-.shimmer::after {
-  content: attr(data-text);
+/* the light: a copy of the text painted with a narrow band; Shimmer() moves it */
+.shimmer-light {
   position: absolute;
   inset: 0;
   color: transparent;
-  background: linear-gradient(90deg, transparent 0%, rgba(242, 241, 240, 0.95) 50%, transparent 100%) no-repeat;
-  background-size: 40% 100%;
+  background-image: linear-gradient(
+    90deg,
+    transparent calc(50% - var(--sw, 24px) / 2),
+    rgba(242, 241, 240, 0.3) calc(50% - var(--sw, 24px) / 6),
+    rgba(242, 241, 240, 0.3) calc(50% + var(--sw, 24px) / 6),
+    transparent calc(50% + var(--sw, 24px) / 2)
+  );
+  background-size: 200% 100%;
+  background-position: 150% 0;
   -webkit-background-clip: text;
   background-clip: text;
-  filter: blur(0.4px);
-  animation: shimmer 1.6s ease-out infinite;
 }
-@keyframes shimmer {
-  0% {
-    background-position: 150% 0;
-  }
-  80%,
-  100% {
-    background-position: -50% 0;
+@keyframes shimmer-in {
+  from {
+    opacity: 0;
   }
 }
 
