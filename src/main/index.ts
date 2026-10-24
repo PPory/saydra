@@ -38,6 +38,9 @@ import {
   type VoiceStats
 } from '../shared/types'
 import { localAsrFailed, preloadLocalAsr, transcribeLocal } from './asr'
+import { createLivePreview, type LivePreview } from './asr/live'
+import { displayText } from '../shared/live-text'
+import { createLiveTidy, type LiveTidy } from './live-tidy'
 import { finishTracking, initAutoLearn, learnFrom, noteKey, trackPaste, type Learned } from './auto-learn'
 import { getFocusContext } from './context'
 import { checkKey, LONG_TEXT_CHARS, transcribe } from './groq'
@@ -54,7 +57,6 @@ import { fixEnglishCase } from './english-case'
 import { isStockPhrase } from './hallucination'
 import {
   askUserMessage,
-  buildAskPrompt,
   buildAskSelectionPrompt,
   buildRefineSystemPrompt,
   buildTranslatePrompt,
@@ -76,6 +78,7 @@ import {
   getSaveRecordings,
   getShortcuts,
   getShowIdleBar,
+  getLivePreview,
   getSiliconflowKey,
   getAutoUpdate,
   getLastRunVersion,
@@ -189,8 +192,19 @@ let selection: Promise<string | null> | null = null
 // Text before the caret in the input box, as context for refine and translate.
 let inputBefore: Promise<string | null> | null = null
 let recordingSeq = 0
+// Text above the pill while the user talks (asr/live.ts). Stopping it hands the
+// model back to the final pass, which waits for `liveStopped`.
+let live: LivePreview | null = null
+let liveTidy: LiveTidy | null = null // 流式输出: punctuation and fillers for settled sentences
+let lastLive: LiveStats | null = null // for the job's perf.log line
+let liveStopped: Promise<void> = Promise.resolve()
 let mutedByUs = false
 let lastLearned: Learned = { words: [], heard: [] }
+
+interface LiveStats {
+  reads: LivePreview
+  tidy: LiveTidy | null
+}
 
 interface Job {
   id: string // history row id; a retry reuses it
@@ -208,6 +222,7 @@ interface Job {
   cancelled?: boolean // Esc while processing: the result is dropped
   stoppedAt?: number // when the user stopped talking; only the first run of a job has it (perf.log)
   stopMs?: number // stopping until the audio reached us
+  live?: LiveStats | null // reads and tidied sentences go to perf.log
 }
 
 // What a mode produced from the transcript, and how to deliver it.
@@ -261,8 +276,7 @@ function alertFor(err: unknown): Omit<BarAlert, 'id'> & { retry: boolean } {
 
 // Groq Whisper's take on the same audio, for refine to check English words against
 // (SenseVoice hears Chinese well and English badly, Whisper the other way round).
-// Started alongside recognition rather than after it, and only waited for when the
-// transcript has English in it; never holds dictation up for long.
+// Started alongside recognition rather than after it; never holds dictation up for long.
 function whisperReference(job: Job): Promise<string | null> {
   const apiKey = getApiKey()
   if (!apiKey) return Promise.resolve(null)
@@ -273,6 +287,9 @@ function whisperReference(job: Job): Promise<string | null> {
   const limit = new Promise<null>((r) => setTimeout(() => r(null), Math.min(8000, 3000 + job.recordMs / 10)))
   return Promise.race([heard, limit])
 }
+
+// Measured 2026-10-24 on 18 real dictations: Whisper ran at most 0.6 s past local recognition.
+const NO_LETTERS_WAIT_MS = 1000
 
 interface Recognized {
   raw: string
@@ -289,6 +306,7 @@ async function transcribeOnDevice(job: Job): Promise<string> {
   const pcm = job.pcm ?? (await decodeInBar(job.audio))
   if (!pcm) throw new Error('录音解码失败')
   await preloadLocalAsr(modelsRoot())
+  await liveStopped
   return transcribeLocal(pcm)
 }
 
@@ -303,7 +321,13 @@ async function recognize(job: Job): Promise<Recognized> {
     const reference = whisperReference(job)
     const finish = async (said: string, from: AsrEngine): Promise<Recognized> => {
       const t = performance.now()
-      const heard = /[A-Za-z]/.test(said) && !job.cancelled ? await reference : null
+      // SenseVoice often writes English as Chinese sounds (「我可巴得」 for WorkBuddy), so
+      // Whisper is asked even when no letters came back, but then only briefly: past ~17 s
+      // of speech it is back first anyway, a short clip waits up to NO_LETTERS_WAIT_MS more.
+      const wait = /[A-Za-z]/.test(said)
+        ? reference
+        : Promise.race([reference, new Promise<null>((r) => setTimeout(() => r(null), NO_LETTERS_WAIT_MS))])
+      const heard = job.cancelled ? null : await wait
       const waitedMs = performance.now() - t
       return { raw: applyHeardAs(fixEnglishCase(said, getDb().terms())), engine: from, heard, waitedMs }
     }
@@ -419,11 +443,12 @@ async function translate(job: Job, { raw, heard }: Recognized): Promise<Output> 
   }
 }
 
-// 问任何问题: rewrite the selection in place, or answer on the card. SenseVoice's
+// 问任何问题: rewrite the selection in place, or answer a question about it on the
+// card (processRecording makes sure there is a selection). SenseVoice's
 // transcript (no punctuation when local) is tidied for display meanwhile. With
 // English in it the tidy-up also fixes misheard words (「MC C P」), so the question waits for it.
 async function askAnything(job: Job, { raw, engine, heard }: Recognized): Promise<Output> {
-  const selectedText = (await job.selection) ?? null
+  const selectedText = (await job.selection) ?? ''
   const tidy =
     engine !== 'groq' && needsRefine(raw, engine === 'siliconflow')
       ? chatWithFallback(refineTargets(raw.length), buildRefineSystemPrompt(null, dictionaryText(), null, heard), raw)
@@ -432,16 +457,16 @@ async function askAnything(job: Job, { raw, engine, heard }: Recognized): Promis
       : Promise.resolve(raw)
   const res = await chatWithFallback(
     refineTargets(raw.length),
-    selectedText ? buildAskSelectionPrompt(job.ctx) : buildAskPrompt(job.ctx),
+    buildAskSelectionPrompt(job.ctx),
     askUserMessage(heard ? await tidy : raw, selectedText),
     {
       wrapTag: '',
       temperature: 0.5,
       timeoutMs: 30_000,
-      maxTokens: selectedText ? Math.ceil(selectedText.length * 2) + 600 : 2000
+      maxTokens: Math.ceil(selectedText.length * 2) + 600
     }
   )
-  const reply = selectedText ? parseAskReply(res.text) : { kind: 'answer' as const, text: res.text }
+  const reply = parseAskReply(res.text)
   if (!reply.text) throw new Error('回答为空')
   return {
     text: reply.text,
@@ -486,6 +511,8 @@ async function processRecording(job: Job): Promise<string | null> {
     stop: job.stopMs,
     asr: null,
     whisper: null,
+    live: null,
+    tidy: null,
     refine: null,
     model: null,
     fallback: null,
@@ -504,6 +531,8 @@ async function processRecording(job: Job): Promise<string | null> {
     perf.asr = `${engine}:${Math.round(transcribeMs - (rec.waitedMs ?? 0))}`
     perf.whisper = rec.waitedMs
     if (job.cancelled) return null
+    // 问任何问题 with nothing selected: what was said is typed like a dictation.
+    if (job.mode === 'ask' && !(await job.selection)) job.mode = 'dictate'
     // REA_SELFTEST_CANCEL=refining: Esc while the text is being refined
     if (SELFTEST_WAV && process.env.REA_SELFTEST_CANCEL === 'refining' && !job.fromHub && !selftestCancelled) selftestCancel()
     // What the focused box holds before we paste, to tell afterwards whether it took it.
@@ -633,6 +662,10 @@ async function processRecording(job: Job): Promise<string | null> {
     savedAudio.delete(job.id)
     if (!job.fromHub) {
       perf.lag = loopDelay.max / 1e6
+      const reads = job.live?.reads.stats()
+      if (reads?.runs) perf.live = `${reads.runs}/${reads.maxMs}`
+      const tidied = job.live?.tidy?.stats()
+      if (tidied?.total) perf.tidy = `${tidied.ok}/${tidied.total}`
       appendLog('perf.log', perfLine(job.mode, perf))
     }
   }
@@ -755,6 +788,42 @@ async function retryFromHistory(id: string): Promise<string | null> {
 
 const translateChip = (m: DictationMode) => (m === 'translate' ? (getTranslateTarget() ?? undefined) : undefined)
 
+// Only with the local model: it is already in memory, and a cloud engine would be
+// asked again every TICK_MS. Returns whether the bar should stream the mic to us.
+function startLivePreview(): boolean {
+  stopLivePreview()
+  if (!getLivePreview() || getAsrEngine() !== 'local' || localAsrFailed()) return false
+  const terms = getDb().terms()
+  const rules = getDb().replacements()
+  const clean = (text: string) => applyReplacements(fixEnglishCase(text, terms), rules)
+  const t0 = Date.now()
+  const sentences: string[] = [] // settled, cleaned once each
+  let tail = ''
+  const push = () => {
+    // A read or tidy that finished after a cancel must not bring the text back.
+    if (view.kind !== 'recording' && view.kind !== 'processing') return
+    const text = displayText(sentences, tidy.polished, tail)
+    if (SELFTEST_WAV) console.log(`  live ${((Date.now() - t0) / 1000).toFixed(1)}s: ${text.settled}｜${text.tail}`)
+    bar.webContents.send(IPC.liveText, text)
+  }
+  const tidy = (liveTidy = createLiveTidy(push))
+  live = createLivePreview(transcribeLocal, (settled, heard) => {
+    for (let i = sentences.length; i < settled.length; i++) sentences.push(clean(settled[i]))
+    tail = clean(heard)
+    tidy.update(sentences)
+    push()
+  })
+  return true
+}
+
+function stopLivePreview(): void {
+  if (!live) return
+  lastLive = { reads: live, tidy: liveTidy }
+  liveStopped = live.stop()
+  liveTidy?.stop()
+  live = liveTidy = null
+}
+
 function recordingView(): BarView {
   return {
     kind: 'recording',
@@ -833,7 +902,10 @@ function refuseStart(): void {
 
 // Read the selection while the user starts talking. A card the user clicked
 // into would receive the Ctrl+C, so it steps aside first.
-function beginAsk(): void {
+// 问任何问题 only works on a selection (asking with nothing selected was dropped):
+// started with nothing selected, the recording is called off with a hint. Switched
+// to mid-dictation, it simply stays a dictation (see processRecording).
+function beginAsk(fromStart: boolean): void {
   if (getCard()?.isFocused()) closeAnswerCard()
   if (SELFTEST_WAV) {
     selection = Promise.resolve(process.env.REA_SELFTEST_SELECTION || null)
@@ -841,6 +913,7 @@ function beginAsk(): void {
   }
   // UI Automation reads the selection without touching the clipboard; apps it
   // cannot read fall back to Ctrl+C.
+  const seq = recordingSeq
   selection = focusInfo()
     .then(async (info) => {
       if (info?.selection?.trim()) return info.selection
@@ -848,6 +921,18 @@ function beginAsk(): void {
       return copySelection(c?.appName ?? null)
     })
     .catch((err) => (console.warn('reading the selection failed', err), null))
+  void selection.then((text) => {
+    if (text || !fromStart || seq !== recordingSeq || view.kind !== 'recording' || mode !== 'ask') return
+    refuseStart()
+    setTimeout(() =>
+      showAlert({
+        id: 'no-selection',
+        title: '先选中要修改的文字',
+        description: `选中后再按 ${shortcutLabel(getShortcuts().ask)}，说出想怎么改。`,
+        autoHideMs: 4000
+      })
+    )
+  })
 }
 
 const keyHandlers: DictationKeyHandlers = {
@@ -875,8 +960,8 @@ const keyHandlers: DictationKeyHandlers = {
     inputBefore = SELFTEST_WAV
       ? Promise.resolve(process.env.REA_SELFTEST_INPUT || null)
       : focusInfo(INPUT_CONTEXT_CHARS).then((info) => info?.before ?? null)
-    if (m === 'ask') beginAsk()
     scheduleMute(++recordingSeq)
+    if (m === 'ask') beginAsk(true)
     recordStartedAt = Date.now()
     loopDelay.reset()
     warmUpConnections()
@@ -889,6 +974,7 @@ const keyHandlers: DictationKeyHandlers = {
     setView(recordingView())
     bar.webContents.send(IPC.startRecording, {
       wantPcm: getAsrEngine() === 'local',
+      livePreview: startLivePreview(),
       sounds: getInteractionSounds(),
       deviceId: getMicrophoneId()
     })
@@ -899,7 +985,7 @@ const keyHandlers: DictationKeyHandlers = {
       return keys.click('cancel')
     }
     mode = m
-    if (m === 'ask' && !selection) beginAsk()
+    if (m === 'ask' && !selection) beginAsk(false)
     setView(recordingView())
   },
   onHandsFree: () => {
@@ -909,6 +995,7 @@ const keyHandlers: DictationKeyHandlers = {
   onStop: () => {
     busy = true // until the audio arrives and is processed
     stoppedAt = Date.now()
+    stopLivePreview()
     setView(processingView(mode))
     // Sound back on first, so the stop cue is heard.
     const unmuted = Promise.race([restoreAudio(), new Promise((r) => setTimeout(r, STOP_CUE_WAIT_MS))])
@@ -917,6 +1004,7 @@ const keyHandlers: DictationKeyHandlers = {
   onCancelProcessing: cancelProcessing,
   onCancel: () => {
     cancelledJob = null
+    stopLivePreview()
     void restoreAudio()
     bar.webContents.send(IPC.cancelRecording)
     setView({ kind: 'idle' })
@@ -1012,13 +1100,16 @@ function wireIpc(): void {
         selection: mode === 'ask' ? selection : null,
         inputBefore,
         stoppedAt: stopped,
-        stopMs: stopped && Date.now() - stopped
+        stopMs: stopped && Date.now() - stopped,
+        live: lastLive
       }
       if (cancelled) cancelledJob = job
       else void processRecording(job)
     }
   )
+  ipcMain.on(IPC.livePcm, (_e, pcm: Float32Array) => live?.push(pcm))
   ipcMain.on(IPC.recordingFailed, (_e, message: string) => {
+    stopLivePreview()
     void restoreAudio()
     busy = false
     keys.click('cancel')
@@ -1512,6 +1603,7 @@ app.whenReady().then(() => {
       setTimeout(() => shoot('1-recording'), 2000)
       setTimeout(() => keyHandlers.onHandsFree(), 3000)
       setTimeout(() => shoot('2-hands-free'), 3600)
+      setTimeout(() => shoot('2b-live-text'), seconds * 1000 - 300) // the most live text
       setTimeout(() => {
         keyHandlers.onStop()
         setTimeout(() => shoot('3-refining'), 400)

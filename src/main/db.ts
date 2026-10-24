@@ -230,6 +230,9 @@ export function openDb(file: string) {
     return audio
   }
 
+  // `term` is collate nocase, so this ignores case.
+  const isTerm = (s: string): boolean => Boolean(db.prepare('select 1 from dictionary where term = ?').get(s.trim()))
+
   function addWord(
     raw: string,
     source: DictSource = 'manual',
@@ -343,10 +346,12 @@ export function openDb(file: string) {
       return 'ok'
     },
 
-    // Auto-learn: the user replaced `form` with a dictionary word. False if already known.
+    // Auto-learn: the user replaced `form` with a dictionary word. False if already known,
+    // or if `form` is a dictionary word itself: refine wrote 「Claude」 for a misheard
+    // 「Groq」 once, and 「Claude」 must not turn into 「Groq」 from then on.
     addHeardAs(term: string, form: string): boolean {
       const row = db.prepare('select * from dictionary where term = ?').get(term) as Row | undefined
-      if (!row) return false
+      if (!row || isTerm(form)) return false
       const before = forms(row)
       const list = cleanForms(row.term, [...before, form])
       if (list === 'too-long' || list.length === before.length) return false
@@ -366,9 +371,11 @@ export function openDb(file: string) {
     },
 
     // Every 常被识别成 form with its word, oldest word first.
+    // A form that is itself a dictionary word is skipped (see addHeardAs; older
+    // versions stored such forms).
     replacements(): Replacement[] {
       const rows = db.prepare('select term, heard_as from dictionary where heard_as is not null order by created_at').all() as Row[]
-      return rows.flatMap((r) => forms(r).map((from) => ({ from, to: r.term })))
+      return rows.flatMap((r) => forms(r).filter((from) => !isTerm(from)).map((from) => ({ from, to: r.term })))
     },
 
     deleteWords(ids: number[]): number {

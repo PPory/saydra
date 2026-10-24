@@ -1,8 +1,9 @@
 // Floating bar: the pill plus alert cards above it.
 import { render } from 'preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { languageName, MAX_TRANSLATE_LANGUAGES } from '../../shared/languages'
 import { COUNTDOWN_MS, MAX_RECORD_MS, type BarAlert, type BarView, type TranslateTarget } from '../../shared/types'
+import { joinLive, revealStep, type LiveText } from '../../shared/live-text'
 import { createRecorder, decodePcm, type MicStatus } from './recorder'
 import { playStart, playStop } from './sounds'
 import { createWaveform } from './waveform'
@@ -11,6 +12,7 @@ import './bar.css'
 const BAR_COUNT = 10 // 38px wide: 2px bars, 2px gaps
 const HOVER_DELAY_MS = 250
 const DONE_FADE_MS = 350
+const REVEAL_MS = 400 // new words in the live caption type out over this long
 
 // Refine progress: fast to 80% in a second, then creeps towards 99%.
 const PROGRESS = [
@@ -187,6 +189,51 @@ function TranslateChip({ target }: { target: TranslateTarget }) {
   )
 }
 
+// What has been heard so far, above the pill: settled sentences in white, the one
+// being spoken in grey (it may still change). Up to five lines; older ones scroll
+// off the top under a fade. New words are typed out over REVEAL_MS, corrections
+// replace at once. Clicks go through it to the app below.
+function LiveCaption({ text, dim, fading }: { text: LiveText; dim: boolean; fading: boolean }) {
+  const { full, split } = joinLive(text)
+  const [shown, setShown] = useState('')
+  const current = useRef('')
+  const show = (s: string) => setShown((current.current = s))
+  useEffect(() => {
+    const { now, pending } = revealStep(current.current, full)
+    show(now)
+    if (!pending) return
+    const chars = Array.from(pending)
+    const t0 = performance.now()
+    let raf = 0
+    const tick = () => {
+      const n = Math.min(chars.length, Math.ceil(((performance.now() - t0) / REVEAL_MS) * chars.length))
+      show(now + chars.slice(0, n).join(''))
+      if (n < chars.length) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [full])
+
+  const box = useRef<HTMLDivElement>(null)
+  const [clipped, setClipped] = useState(false)
+  useLayoutEffect(() => {
+    // Overflow at the top of a bottom-aligned box doesn't count in scrollHeight.
+    const el = box.current
+    if (el) setClipped((el.firstElementChild as HTMLElement).offsetHeight > el.clientHeight + 1)
+  }, [shown])
+  const at = Math.min(split, shown.length)
+  return (
+    <div class="live" data-dim={dim ? '' : undefined} data-fading={fading ? '' : undefined}>
+      <div ref={box} class="live-box" data-clipped={clipped ? '' : undefined}>
+        <p>
+          <span class="settled">{shown.slice(0, at)}</span>
+          <span class="tail">{shown.slice(at)}</span>
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // Tell the main process where the pill and cards are: it checks the pointer against
 // them too, in case the forwarded mouse moves stop arriving (see watchBarPointer).
 const HIT_TARGETS = '.alert, .pill:not([data-hidden]), .tchip-wrap, .tchip-pop'
@@ -236,6 +283,7 @@ function App() {
   const [progress, setProgress] = useState(0)
   const [fading, setFading] = useState(false)
   const [showIdle, setShowIdle] = useState(false) // hidden until settings say otherwise: no flash when it is off
+  const [liveText, setLiveText] = useState<LiveText | null>(null)
   const soundsOn = useRef(true)
 
   const wave = useMemo(() => createWaveform(BAR_COUNT, setHeights), [])
@@ -251,6 +299,7 @@ function App() {
   useEffect(() => {
     window.rea.onStartRecording((req) => {
       soundsOn.current = req.sounds
+      setLiveText(null)
       if (req.sounds) playStart()
       void recorder.start(req)
     })
@@ -263,6 +312,7 @@ function App() {
     window.rea.onResendCancelled(() => recorder.resendCancelled())
     window.rea.onView(setView)
     window.rea.onShowIdleBar(setShowIdle)
+    window.rea.onLiveText(setLiveText)
     void window.rea.getSettings().then((s) => setShowIdle(s.showIdleBar))
     window.rea.onAlert((a) => setAlerts((list) => [...list.filter((x) => x.id !== a.id), a].slice(-2)))
     window.rea.onClearAlert((id) => setAlerts((list) => (id ? list.filter((x) => x.id !== id) : [])))
@@ -319,6 +369,11 @@ function App() {
       return () => clearTimeout(id)
     }
     setProgress(0)
+  }, [view.kind])
+
+  // The text goes when the dictation does (pasted, cancelled or failed).
+  useEffect(() => {
+    if (view.kind === 'idle' || view.kind === 'error') setLiveText(null)
   }, [view.kind])
 
   // The idle handle expands only after the pointer rests on it.
@@ -389,6 +444,9 @@ function App() {
           />
         ))}
       </div>
+      {liveText && (liveText.settled || liveText.tail) && !alerts.length && (
+        <LiveCaption text={liveText} dim={view.kind !== 'recording'} fading={fading} />
+      )}
       {translate && <TranslateChip target={translate} />}
       <div class="pill-wrap">
         <Tooltip text="点击开始录音" show={status === 'hover'} />

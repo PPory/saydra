@@ -39,7 +39,7 @@ function GeneralPage({ s, save }: { s: PublicSettings; save: Save }) {
         <Row title="翻译" description="按下开始和停止翻译。" top>
           <ShortcutInput target="translate" value={s.shortcuts.translate} canDisable onChange={setShortcut('translate')} />
         </Row>
-        <Row title="问任何问题" description="选中文字后说出指令来改写它，或者直接提问。" top>
+        <Row title="改写选中文字" description="选中文字后说出指令来改写它，也可以问关于它的问题。" top>
           <ShortcutInput target="ask" value={s.shortcuts.ask} canDisable onChange={setShortcut('ask')} />
         </Row>
         <Row title="粘贴上一次转录" description="把最近一次的转录再粘贴一遍。" top>
@@ -66,6 +66,21 @@ function GeneralPage({ s, save }: { s: PublicSettings; save: Save }) {
         </Row>
         <Row title="语音输入时静音" description="在语音输入时自动静音其他活动音频。">
           <Switch label="语音输入时静音" checked={s.muteWhileDictating} onChange={(v) => save({ muteWhileDictating: v })} />
+        </Row>
+        <Row
+          title="流式输出"
+          description={
+            s.asrEngine === 'local'
+              ? '说话时在浮条上方实时显示整理过的文字，说完再完整润色后粘贴。'
+              : '说话时在浮条上方实时显示整理过的文字。仅在「模型服务 → 语音识别」选本地识别时可用。'
+          }
+        >
+          <Switch
+            label="流式输出"
+            checked={s.livePreview && s.asrEngine === 'local'}
+            disabled={s.asrEngine !== 'local'}
+            onChange={(v) => save({ livePreview: v })}
+          />
         </Row>
       </Section>
       <Section icon="system" title="常规">

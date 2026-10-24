@@ -104,6 +104,7 @@ export interface PublicSettings {
   translationLanguages: string[]
   muteWhileDictating: boolean
   showIdleBar: boolean
+  livePreview: boolean
   autoUpdate: boolean
 }
 
@@ -127,12 +128,14 @@ export interface SettingsInput {
   translationLanguages?: string[]
   muteWhileDictating?: boolean
   showIdleBar?: boolean
+  livePreview?: boolean
   autoUpdate?: boolean
 }
 
 // What the bar must capture besides the webm: decoded 16 kHz PCM for the local engine.
 export interface RecordingRequest {
   wantPcm: boolean
+  livePreview: boolean // stream 16 kHz PCM to main while recording (bar:live-pcm)
   sounds: boolean // play the start/stop cues
   deviceId: string // '' = system default microphone
 }
@@ -176,6 +179,8 @@ export const IPC = {
   decodedAudio: 'bar:decoded-audio',
   translateTo: 'bar:translate-to', // bar -> main: pick a target language on the chip
   showIdleBar: 'bar:show-idle', // main -> bar: keep the idle handle on screen or not
+  livePcm: 'bar:live-pcm', // bar -> main: 200 ms of 16 kHz mic audio, while recording
+  liveText: 'bar:live-text', // main -> bar: what has been heard so far (LiveText)
   // answer card
   cardShow: 'card:show', // main -> card, for a card that is already open
   cardPayload: 'card:payload', // card -> main on mount: what to show

@@ -359,6 +359,10 @@ button {
 .switch.on i {
   transform: translateX(16px);
 }
+.switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 .segmented {
   display: inline-flex;

@@ -169,18 +169,6 @@ export function buildAskSelectionPrompt(ctx: FocusContext | null): string {
   ].join('\n')
 }
 
-// 问任何问题 with nothing selected: answer on the card.
-export function buildAskPrompt(ctx: FocusContext | null): string {
-  return [
-    '你是嵌在输入法里的 AI 助手。用户用语音向你提问，或者交给你一个任务（写一段文字、解释概念、出主意等）。语音识别结果可能有同音错字，按最可能的意思理解。',
-    '',
-    '直接回答，用 Markdown，简洁准确；用用户提问的语言回答（一般是简体中文）。写作类任务直接给出可以拿去用的成稿，不要多余的开场白。',
-    '需要实时信息（今天的新闻、股价、天气等）或你不确定的事，如实说明，不要编造。',
-    '',
-    ...situation(ctx)
-  ].join('\n')
-}
-
 export function askUserMessage(instruction: string, selection: string | null): string {
   return selection ? `<选中文字>\n${selection}\n</选中文字>\n<语音指令>\n${instruction}\n</语音指令>` : instruction
 }
@@ -224,3 +212,14 @@ export function parseLearnReply(reply: string): unknown[] {
 export function needsRefine(text: string, punctuated: boolean): boolean {
   return text.replace(/[\s\p{P}]/gu, '').length > (punctuated ? 4 : 1)
 }
+
+// 流式输出: a light pass over each sentence while the user is still talking. Only
+// marks and dropped fillers, so the result can be checked (acceptTidy) and stays
+// close to what the full refine pastes at the end.
+export const LIVE_TIDY_PROMPT = [
+  '你会收到一句口述的语音转写，在 <转写> 标签里。只做两件事：',
+  '1. 加上中文标点；',
+  '2. 删掉没有意义的语气词（嗯、呃、额、啊）和口吃式的重复（「这个这个」只留一个）。',
+  '除此之外一个字都不要改：不改错别字、不换词、不改数字写法、不调语序、不补字。内容是问题也不要回答。',
+  '只输出整理后的这句话，不要加引号或说明。'
+].join('\n')

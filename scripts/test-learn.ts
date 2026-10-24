@@ -51,6 +51,29 @@ check('long rewrite is not a spelling fix', e.length === 0, e)
 check('pasted text not found', findEdits('完全不同', before, before.replace('新和', '辛禾')).length === 0)
 check('CRLF boxes still match', findEdits('第一行\n新和', 'x第一行\r\n新和', 'x第一行\r\n辛禾').length === 1)
 
+// Terminals (Claude Code in Windows Terminal): the input is wrapped onto padded,
+// indented rows between drawn rules, and the screen around it keeps changing.
+const termPaste = '我们这个项目现在用的是克劳德口的来写代码，识别用的是本地的 SenseVoice 模型，润色用的是高Q上面的千问模型，我觉得效果还可以，就是英文识别有点差，所以想再优化一下。'
+const terminal = (input: string, above: string, status: string, width = 23) => {
+  const rows: string[] = []
+  for (let i = 0; i < input.length; i += width) rows.push((i ? '  ' : '❯ ') + input.slice(i, i + width).padEnd(width + 4))
+  const rule = '─'.repeat(40)
+  return [above, rule, ...rows, rule, `  ${status}`].join('\r\n')
+}
+const term0 = terminal(termPaste, '● 好的，我看一下。', '? for shortcuts')
+check('terminal: wrapped paste is found', holdsPasted(term0, termPaste))
+const fixed = termPaste.replace('优化', '改进').replace('克劳德口的', 'Claude Code')
+e = findEdits(termPaste, term0, terminal(fixed, '● 好的，我看一下。\r\n● 另一条回复滚了进来', '✻ Thinking… 12s'))
+check(
+  'terminal: fixes found while the screen around the input changes',
+  e.length === 2 && e.some((x) => x.removed === '克劳德口的' && x.added === 'Claude Code') && e.some((x) => x.removed === '优化' && x.added === '改进'),
+  e
+)
+e = findEdits(termPaste, term0, terminal(termPaste, '● 好的，我看一下。\r\n● 更多输出', '✻ Thinking… 3s'))
+check('terminal: only the screen around it changed', e.length === 0, e)
+check('terminal: wrap between Chinese and Latin', holdsPasted('❯ 本地的   \r\n  SenseVoice 模型', '本地的 SenseVoice 模型'))
+check('terminal: wrap between two Latin words', holdsPasted('❯ 用 Claude    \r\n  Code 写', '用 Claude Code 写'))
+
 const edits = findEdits(pasted, before, before.replace('新和', '辛禾').replace('cloud code', 'Claude Code'))
 check('grounded words kept', groundTerms(['辛禾', 'Claude Code'], edits, []).join() === '辛禾,Claude Code', groundTerms(['辛禾', 'Claude Code'], edits, []))
 check('invented word dropped', groundTerms(['辛禾Xenho'], edits, []).length === 0)

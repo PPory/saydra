@@ -1,6 +1,7 @@
 // Microphone capture for one dictation: webm/opus for upload and retries,
 // optional 16 kHz PCM for the local engine, and a simple voice detector.
 import type { RecordingRequest, VoiceStats } from '../../shared/types'
+import tapUrl from './pcm-tap.worklet?worker&url'
 
 const MIME = 'audio/webm;codecs=opus'
 const PCM_RATE = 16_000 // what the local SenseVoice model expects
@@ -61,6 +62,19 @@ export function createRecorder(onStatus: (status: MicStatus, analyser: AnalyserN
     window.rea.sendRecording(await k.blob.arrayBuffer(), MIME, k.voice, pcm)
   }
 
+  // Live preview: stream the mic to main as it is recorded (see pcm-tap.worklet.ts).
+  async function attachTap(ctx: AudioContext, source: MediaStreamAudioSourceNode): Promise<void> {
+    try {
+      await ctx.audioWorklet.addModule(tapUrl)
+      if (audioCtx !== ctx) return // already stopped
+      const tap = new AudioWorkletNode(ctx, 'pcm-tap', { numberOfInputs: 1, numberOfOutputs: 0 })
+      tap.port.onmessage = (e: MessageEvent<Float32Array>) => window.rea.sendLivePcm(e.data)
+      source.connect(tap)
+    } catch (err) {
+      console.warn('live preview unavailable', err)
+    }
+  }
+
   function release(): void {
     clearInterval(vadTimer)
     stream?.getTracks().forEach((t) => t.stop())
@@ -107,7 +121,9 @@ export function createRecorder(onStatus: (status: MicStatus, analyser: AnalyserN
     analyser = audioCtx.createAnalyser()
     analyser.fftSize = 2048
     analyser.smoothingTimeConstant = 0.7
-    audioCtx.createMediaStreamSource(stream).connect(analyser)
+    const source = audioCtx.createMediaStreamSource(stream)
+    source.connect(analyser)
+    if (req.livePreview) void attachTap(audioCtx, source)
 
     const frame = new Float32Array(analyser.fftSize)
     vadTimer = window.setInterval(() => {

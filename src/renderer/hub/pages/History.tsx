@@ -71,7 +71,7 @@ function Row({ item, onChanged }: { item: HistoryItem; onChanged: () => void }) 
         {(item.mode !== 'dictate' || item.appName) && (
           <span class="history-meta">
             {item.mode === 'translate' && <em class="tag tag-translate">翻译</em>}
-            {item.mode === 'ask' && <em class="tag tag-ask">问任何问题</em>}
+            {item.mode === 'ask' && <em class="tag tag-ask">改写选中文字</em>}
             {item.appName?.replace(/\.(exe|app)$/i, '')}
           </span>
         )}
@@ -216,7 +216,7 @@ export function History({ version }: { version: number }) {
         tabs={[
           { value: 'all', label: '全部' },
           { value: 'dictate', label: '听写' },
-          { value: 'ask', label: '问任何问题' }
+          { value: 'ask', label: '改写选中文字' }
         ]}
       />
 

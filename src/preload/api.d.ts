@@ -27,6 +27,8 @@ import type {
   VoiceStats
 } from '../shared/types'
 
+import type { LiveText } from '../shared/live-text'
+
 type Result = { ok: boolean; message: string }
 
 declare global {
@@ -41,6 +43,8 @@ declare global {
       onAlert(cb: (alert: BarAlert) => void): void
       onClearAlert(cb: (id: string | null) => void): void
       onShowIdleBar(cb: (show: boolean) => void): void
+      sendLivePcm(pcm: Float32Array): void
+      onLiveText(cb: (text: LiveText) => void): void
       sendRecording(audio: ArrayBuffer, mimeType: string, voice: VoiceStats, pcm: Float32Array | null): void
       sendRecordingFailed(message: string): void
       sendAction(action: BarActionName): void

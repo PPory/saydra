@@ -37,10 +37,12 @@ interface Session {
   pasted: string
   app: string
   baseline: string
-  last: string // latest reading that still had text in it
+  last: string // latest reading with a fix in the pasted text
   judged: string // `last` as of the latest judgement
+  read: string // latest reading of any kind
+  fixes: string // the fixes in `last`, to tell a new fix from the screen redrawing
+  touched: boolean // the pasted text was changed at some point
   startedAt: number
-  edited: boolean
   seen: Set<string> // corrections already judged
   busy: boolean
   again: boolean
@@ -121,9 +123,18 @@ async function read(s: Session): Promise<void> {
   if (s.ended || !now) return // a failed read: the next one will do
   if (now.text === undefined) return end(s, 'gone')
   if (!now.text.trim()) return end(s, 'sent') // judged as it read just before
-  if (now.text === s.last) return
+  if (now.text === s.read) return
+  s.read = now.text
+  // Terminals redraw around the input all the time (spinners, a reply scrolling
+  // in), so only a change to the pasted text counts, and the pause before judging
+  // starts over only when the fixes in it change.
+  const edits = findEdits(s.pasted, s.baseline, now.text)
+  if (edits.length || !holdsPasted(now.text, s.pasted)) s.touched = true
+  if (!edits.length) return // keep the last reading that had the fix
   s.last = now.text
-  s.edited = true
+  const fixes = edits.map((e) => `${e.removed}→${e.added}`).join('|')
+  if (fixes === s.fixes) return
+  s.fixes = fixes
   clearTimeout(s.idle)
   s.idle = setTimeout(() => void judge(s), IDLE_MS)
 }
@@ -139,7 +150,7 @@ function end(s: Session, reason: EndReason): void {
   void judge(s).finally(() => {
     const { edits, asked, noModel, words, heard } = s.stats
     const outcome =
-      s.last === s.baseline ? 'unchanged'
+      s.last === s.baseline ? (s.touched ? 'no-word-sized-edit' : 'unchanged')
       : words || heard ? 'learned'
       : asked ? 'not-a-word-fix' // the model saw the edits and named no word
       : noModel ? 'no-refine-service'
@@ -177,8 +188,10 @@ export async function trackPaste(pasted: string): Promise<void> {
     baseline: info.text,
     last: info.text,
     judged: info.text,
+    read: info.text,
+    fixes: '',
+    touched: false,
     startedAt,
-    edited: false,
     seen: new Set(),
     busy: false,
     again: false,
@@ -186,7 +199,7 @@ export async function trackPaste(pasted: string): Promise<void> {
     ended: false,
     poll: setInterval(() => {
       void read(s)
-      if (!s.edited && Date.now() - startedAt > FIRST_EDIT_WITHIN_MS) end(s, 'no-edit')
+      if (!s.touched && Date.now() - startedAt > FIRST_EDIT_WITHIN_MS) end(s, 'no-edit')
     }, POLL_MS),
     limit: setTimeout(() => end(s, 'timeout'), MAX_TRACK_MS),
     stats: { edits: 0, asked: 0, noModel: 0, words: 0, heard: 0 }

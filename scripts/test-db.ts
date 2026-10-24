@@ -116,6 +116,12 @@ check('undo a learned form', db.removeHeardAs('开发', '开花') && db.listWord
 check('undo is a no-op the second time', !db.removeHeardAs('开发', '开花') && db.addHeardAs('开发', '开花'))
 check('replacements list', JSON.stringify(db.replacements()) === JSON.stringify([{ from: '开化', to: '开发' }, { from: '开花', to: '开发' }]), JSON.stringify(db.replacements()))
 check('clearing forms', db.updateWord(dev.id, '开发', []) === 'ok' && db.replacements().length === 0)
+db.addWord('groq')
+check('a dictionary word is never learned as a wrong form', !db.addHeardAs('groq', 'CLAUDE CODE') && db.addHeardAs('groq', '高Q'))
+const groq = db.listWords('groq', null)[0]
+db.updateWord(groq.id, 'groq', ['高Q', 'Claude Code'])
+check('a stored form that is a dictionary word is not replaced', JSON.stringify(db.replacements()) === JSON.stringify([{ from: '高Q', to: 'groq' }]), JSON.stringify(db.replacements()))
+db.updateWord(groq.id, 'groq', [])
 check('split old textarea', splitDictionary('辛禾Xenho, Claude Code，Typeless\nA、B').length === 5)
 
 // --- jsonl import

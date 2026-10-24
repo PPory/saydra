@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { LiveText } from '../shared/live-text'
 import {
   IPC,
   type BarActionName,
@@ -55,6 +56,8 @@ const api = {
   sendDecoded: (reqId: string, pcm: Float32Array | null) => ipcRenderer.send(IPC.decodedAudio, reqId, pcm),
   translateTo: (code: string) => ipcRenderer.send(IPC.translateTo, code),
   onShowIdleBar: (cb: (show: boolean) => void) => on(IPC.showIdleBar, cb),
+  sendLivePcm: (pcm: Float32Array) => ipcRenderer.send(IPC.livePcm, pcm),
+  onLiveText: (cb: (text: LiveText) => void) => on(IPC.liveText, cb),
   // answer card
   onCardShow: (cb: (payload: AnswerPayload) => void) => on(IPC.cardShow, cb),
   cardPayload: (): Promise<AnswerPayload | null> => ipcRenderer.invoke(IPC.cardPayload),

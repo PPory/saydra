@@ -30,6 +30,7 @@ interface Schema {
   translationActive: string // the one picked on the bar's 「翻译为」 chip
   muteWhileDictating: boolean
   showIdleBar: boolean // the idle handle stays on screen; off = only while dictating
+  livePreview: boolean // show what is heard above the pill while talking (local engine only)
   autoUpdate: boolean // check GitHub releases on start and every few hours
   lastRunVersion: string // a different version on start means it was just updated
   mutedByApp: boolean // we muted the speakers; undo it after a crash
@@ -61,6 +62,7 @@ const createStore = () => new Store<Schema>({
     translationActive: 'en',
     muteWhileDictating: true,
     showIdleBar: true,
+    livePreview: true,
     autoUpdate: true,
     lastRunVersion: '',
     mutedByApp: false
@@ -113,6 +115,7 @@ export function setTranslationActive(code: string): void {
 }
 export const getMuteWhileDictating = (): boolean => store().get('muteWhileDictating')
 export const getShowIdleBar = (): boolean => store().get('showIdleBar')
+export const getLivePreview = (): boolean => store().get('livePreview')
 export const getAutoUpdate = (): boolean => store().get('autoUpdate')
 export const getLastRunVersion = (): string => store().get('lastRunVersion')
 export const setLastRunVersion = (v: string) => store().set('lastRunVersion', v)
@@ -162,6 +165,7 @@ export function getPublicSettings(): PublicSettings {
     translationLanguages: getTranslationLanguages(),
     muteWhileDictating: store().get('muteWhileDictating'),
     showIdleBar: store().get('showIdleBar'),
+    livePreview: store().get('livePreview'),
     autoUpdate: store().get('autoUpdate')
   }
 }
@@ -187,6 +191,7 @@ export function saveSettings(input: SettingsInput): void {
   if (input.launchAtLogin !== undefined) setLaunchAtLogin(input.launchAtLogin)
   if (input.muteWhileDictating !== undefined) store().set('muteWhileDictating', input.muteWhileDictating)
   if (input.showIdleBar !== undefined) store().set('showIdleBar', input.showIdleBar)
+  if (input.livePreview !== undefined) store().set('livePreview', input.livePreview)
   if (input.autoUpdate !== undefined) store().set('autoUpdate', input.autoUpdate)
   if (input.translationLanguages) {
     const before = getTranslationLanguages()

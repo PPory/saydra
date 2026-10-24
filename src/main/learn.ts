@@ -20,13 +20,15 @@ interface Hunk {
 // punctuation mark is its own token.
 const TOKEN = /[\p{L}\p{N}]+(?:['’.\-_][\p{L}\p{N}]+)*|\s+|./gsu
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+const CJK_OR_REST = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[^\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu
 
 function tokenize(s: string): string[] {
   const out: string[] = []
   for (const m of s.matchAll(TOKEN)) {
     const t = m[0]
     // Split runs of CJK letters into characters: there are no spaces between words.
-    if (CJK.test(t)) for (const ch of t) out.push(ch)
+    // A Latin word written straight after them (「和cloud」) stays whole.
+    if (CJK.test(t)) out.push(...t.match(CJK_OR_REST)!)
     else out.push(t)
   }
   return out
@@ -109,12 +111,46 @@ const MAX_EDIT_CHARS = 30
 const CONTEXT_CHARS = 30
 const onlyPunctuation = (s: string) => !/[\p{L}\p{N}]/u.test(s)
 // Editors read back what was pasted with their own line breaks: \r\n, blank lines
-// between paragraphs dropped, zero-width marks around rich text.
+// between paragraphs dropped, zero-width marks around rich text. Terminals pad
+// every row with spaces, wrap long input onto indented rows anywhere in a sentence
+// and draw boxes around it. None of that is about how a word is spelled, so line
+// breaks go (a space between two Latin words) and so do spaces between Chinese
+// and Latin, which a wrap can add or drop.
+const BREAK = /[ \t─-╿]*\n[\s─-╿]*/g
 const normalize = (s: string) =>
   s
     .replace(/\r\n?/g, '\n')
     .replace(/[​-‏﻿]/g, '')
-    .replace(/[ \t]*\n[\s]*/g, '\n')
+    .replace(BREAK, (m: string, at: number, all: string) =>
+      /[A-Za-z0-9,.;:!?)]/.test(all[at - 1] ?? '') && /[A-Za-z0-9(]/.test(all[at + m.length] ?? '') ? ' ' : ''
+    )
+    .replace(/(\p{Script=Han})[ \t]+(?=[A-Za-z0-9])/gu, '$1')
+    .replace(/([A-Za-z0-9])[ \t]+(?=\p{Script=Han})/gu, '$1')
+
+const ANCHOR_CHARS = 12
+
+// Where the pasted stretch is now. Terminals keep redrawing around the input
+// (spinners, status lines, a reply scrolling in), which a diff of the whole box
+// would mistake for the user rewriting it, so only the paste and a little on each
+// side is compared: found again by the text just before and just after it.
+function nearest(s: string, part: string, near: number): number {
+  let best = -1
+  for (let i = s.indexOf(part); i >= 0; i = s.indexOf(part, i + 1)) if (best < 0 || Math.abs(i - near) < Math.abs(best - near)) best = i
+  return best
+}
+
+function pasteWindow(baseline: string, current: string, pos: number, end: number) {
+  const before = baseline.slice(Math.max(0, pos - ANCHOR_CHARS), pos)
+  const after = baseline.slice(end, end + ANCHOR_CHARS)
+  const room = before.length + (end - pos) * 1.5 + 60 + after.length
+  let cs = before ? nearest(current, before, pos - before.length) : 0
+  let ce = !after ? current.length : cs >= 0 ? current.indexOf(after, cs + before.length) : nearest(current, after, end)
+  if (ce >= 0 && after) ce += after.length
+  if (cs < 0 && ce < 0) [cs, ce] = [0, current.length]
+  else if (cs < 0) cs = Math.max(0, Math.floor(ce - room))
+  else if (ce < 0) ce = Math.min(current.length, Math.ceil(cs + room))
+  return { bs: pos - before.length, be: end + after.length, cs, ce }
+}
 
 // The box holds what we pasted (line breaks aside), so tracking it makes sense.
 export const holdsPasted = (box: string, pasted: string): boolean => {
@@ -127,12 +163,16 @@ export const holdsPasted = (box: string, pasted: string): boolean => {
 // replacements count; added sentences, deletions and rewrites are not about
 // how a word is spelled.
 export function findEdits(pasted: string, baselineRaw: string, currentRaw: string): Edit[] {
-  const baseline = normalize(baselineRaw)
-  const current = normalize(currentRaw)
   const p = normalize(pasted).trim()
-  if (!p || baseline === current) return []
-  const pos = baseline.lastIndexOf(p)
-  if (pos < 0) return []
+  const wholeBaseline = normalize(baselineRaw)
+  const wholeCurrent = normalize(currentRaw)
+  const at = wholeBaseline.lastIndexOf(p)
+  if (!p || at < 0) return []
+  const w = pasteWindow(wholeBaseline, wholeCurrent, at, at + p.length)
+  const baseline = wholeBaseline.slice(w.bs, w.be)
+  const current = wholeCurrent.slice(w.cs, w.ce)
+  if (baseline === current) return []
+  const pos = at - w.bs
   const end = pos + p.length
 
   const hunks = diff(baseline, current)
@@ -150,7 +190,7 @@ export function findEdits(pasted: string, baselineRaw: string, currentRaw: strin
     // phrase means the user was rewording here, so nothing nearby is a spelling fix.
     if (removed.length > MAX_EDIT_CHARS || added.length > MAX_EDIT_CHARS) return []
     if (added.length > removed.length * 2 + 2 || removed.length > added.length * 2 + 2) return []
-    if (onlyPunctuation(added) || /\n/.test(added)) continue
+    if (onlyPunctuation(added)) continue
     const ctxStart = Math.max(pos, h.aStart - CONTEXT_CHARS)
     const ctxEnd = Math.min(end, h.aEnd + CONTEXT_CHARS)
     edits.push({

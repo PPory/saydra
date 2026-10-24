@@ -178,7 +178,7 @@ function Shortcuts({ bindings }: { bindings: ShortcutBindings | null }) {
   const rows = [
     { label: '口述', desc: '杂乱的想法 → 清晰的文字', keys: bindings.dictate },
     { label: '翻译', desc: '自然的语言 → 清晰、地道的写作', keys: bindings.translate },
-    { label: '问任何问题', desc: '编辑或询问文本', keys: bindings.ask }
+    { label: '改写选中文字', desc: '改写或询问选中的文字', keys: bindings.ask }
   ]
   return (
     <div class="shortcut-list">
