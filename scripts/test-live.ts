@@ -78,6 +78,21 @@ void (async () => {
   check('settled sentences are not read again', longest < 6.5, `longest read ${longest.toFixed(1)} s`)
   check('reads are counted', stats.runs >= 3 && stats.maxMs > 0, JSON.stringify(stats))
 
+  // A sentence that settles was the tail a moment ago: the words on the card do
+  // not change, only their place does, so the card must not be told twice. The
+  // state moves (one more settled sentence, no tail) while the text stays the
+  // same — keyed on the state, the same words would be pushed a second time.
+  {
+    const shown: string[] = []
+    const preview = createLivePreview(fakeTranscribe, (done, tail) => shown.push(done.join('') + tail))
+    preview.push(voice(4))
+    await new Promise((r) => setTimeout(r, GAP_MS * 2)) // the read sees the voice, no pause yet
+    preview.push(quiet(0.6))
+    await new Promise((r) => setTimeout(r, GAP_MS * 2)) // now the pause settles the sentence
+    await preview.stop()
+    check('a settling sentence is one update', shown.length === 1 && shown[0] === '字字字字', shown.join(' | '))
+  }
+
   // stop() waits for the read in flight, and nothing is read after it
   let reading = 0
   let after = 0

@@ -75,7 +75,12 @@ export function createLivePreview(
   let maxMs = 0
 
   const show = () => {
-    const key = settled.length + '\n' + current
+    // Key on the words that are shown, not on the state they are in: a sentence
+    // that settles was the tail a moment ago, so the same words would otherwise
+    // be pushed twice — once as the tail, once as a settled sentence — and the
+    // card would be told about text that did not change. The words are the same
+    // either way; only their place in the sentence moved.
+    const key = settled.join('') + current
     if (key === shown) return
     shown = key
     onText([...settled], current)
